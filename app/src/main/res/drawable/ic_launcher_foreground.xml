@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- 账本封面 -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M36,32 h36 a5,5 0 0 1 5,5 v34 a5,5 0 0 1 -5,5 h-36 a5,5 0 0 1 -5,-5 v-34 a5,5 0 0 1 5,-5 z" />
+    <!-- 人民币符号 ¥ -->
+    <path
+        android:pathData="M47,43 L54,53 L61,43"
+        android:strokeColor="#FF2E7D32"
+        android:strokeWidth="4"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <path
+        android:pathData="M54,53 L54,69"
+        android:strokeColor="#FF2E7D32"
+        android:strokeWidth="4"
+        android:strokeLineCap="round" />
+    <path
+        android:pathData="M46,59 L62,59"
+        android:strokeColor="#FF2E7D32"
+        android:strokeWidth="4"
+        android:strokeLineCap="round" />
+    <path
+        android:pathData="M46,65 L62,65"
+        android:strokeColor="#FF2E7D32"
+        android:strokeWidth="4"
+        android:strokeLineCap="round" />
+</vector>

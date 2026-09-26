@@ -1,0 +1,44 @@
+# ================= Android / Gradle 构建产物 =================
+# 本项目的 build 目录有 300+ MB，属于可再生成的产物，不入库
+build/
+app/build/
+.gradle/
+.kotlin/
+captures/
+.externalNativeBuild/
+.cxx/
+release/
+*.apk
+*.aab
+*.ap_
+*.dex
+*.class
+
+# ================= 本机专属配置 =================
+# local.properties 里是本机的 SDK 绝对路径，每台机器都不一样，不入库
+local.properties
+.idea/
+*.iml
+*.hprof
+.DS_Store
+Thumbs.db
+
+# ================= 签名文件（绝对不能提交）=================
+*.jks
+*.keystore
+keystore.properties
+signing.properties
+
+# ================= 调试临时文件 =================
+*.log
+build-*.log
+test-*.log
+ui*.xml
+shot-*.png
+/verify-backup.json
+/clean-backup.json
+*.tmp
+
+# ================= 但文档截图要保留 =================
+!docs/screenshots/
+!docs/screenshots/*.png
