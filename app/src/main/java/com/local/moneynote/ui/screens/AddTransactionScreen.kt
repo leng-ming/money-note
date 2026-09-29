@@ -64,6 +64,7 @@ import com.local.moneynote.AppViewModel
 import com.local.moneynote.core.Dates
 import com.local.moneynote.core.Money
 import com.local.moneynote.data.AccountEntity
+import com.local.moneynote.data.CategoryEntity
 import com.local.moneynote.data.TxKind
 import com.local.moneynote.ui.AccountStyles
 import com.local.moneynote.ui.CatIcons
@@ -102,11 +103,15 @@ fun AddTransactionScreen(
     var note by remember { mutableStateOf("") }
     var occurredAt by remember { mutableStateOf(System.currentTimeMillis()) }
     var loaded by remember { mutableStateOf(false) }
+    // 用户是否手动选过账户。选过之后就不再自动预选，免得"抢"用户的选择
+    var accountTouched by remember { mutableStateOf(false) }
 
     var showAccountPicker by remember { mutableStateOf(false) }
     var showDatePicker by remember { mutableStateOf(false) }
     var showNoteDialog by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
+    // 非 null 时展示该一级分类的二级细分面板
+    var showSubCategoryFor by remember { mutableStateOf<CategoryEntity?>(null) }
 
     val isEditing = txId > 0L
 
@@ -120,27 +125,47 @@ fun AddTransactionScreen(
                 accountId = t.accountId
                 note = t.note
                 occurredAt = t.occurredAt
+                // 编辑时沿用原账单的账户，不要被"账户记忆"覆盖
+                accountTouched = true
             }
         }
         loaded = true
     }
 
-    // 兜底默认值
-    LaunchedEffect(loaded, accounts, allCategories) {
-        if (!loaded) return@LaunchedEffect
-        if (accountId == null) accountId = accounts.firstOrNull()?.id
-        if (categoryId == null) categoryId = allCategories.firstOrNull { it.kind == kind }?.id
+    // 记账页只展示一级分类；二级细分通过点一级分类弹出的面板选
+    val topCats = remember(allCategories, kind) {
+        allCategories.filter { it.kind == kind && it.parentId == null }
     }
+    val subCatsOf: (Long) -> List<CategoryEntity> = { parentId ->
+        allCategories.filter { it.parentId == parentId }
+    }
+    // 当前选中的一级分类（选了二级时回溯到它的父级）
+    val selectedCategory = allCategories.firstOrNull { it.id == categoryId }
+    val selectedTopId: Long? = selectedCategory?.let { it.parentId ?: it.id }
 
-    // 切换收/支时，把不属于当前类型的分类换掉
-    LaunchedEffect(kind) {
+    // 分类兜底：首次进入、或切换收/支后原分类不属于当前类型时，换一个
+    LaunchedEffect(loaded, allCategories, kind) {
+        if (!loaded) return@LaunchedEffect
         val cur = allCategories.firstOrNull { it.id == categoryId }
-        if (cur != null && cur.kind != kind) {
-            categoryId = allCategories.firstOrNull { it.kind == kind }?.id
+        if (cur == null || cur.kind != kind) {
+            categoryId = topCats.firstOrNull()?.id
         }
     }
 
-    val cats = remember(allCategories, kind) { allCategories.filter { it.kind == kind } }
+    // 账户记忆：优先「该分类上次用过的账户」，其次「全局上次用过的账户」，
+    // 都没有历史才退回第一个账户。用户手动选过之后不再干预。
+    LaunchedEffect(loaded, accounts, categoryId, accountTouched) {
+        if (!loaded || accountTouched || accounts.isEmpty()) return@LaunchedEffect
+        if (isEditing) return@LaunchedEffect
+        val remembered = categoryId?.let { vm.repo.lastAccountIdForCategory(it) }
+            ?: vm.repo.lastAccountId()
+        accountId = if (remembered != null && accounts.any { it.id == remembered }) {
+            remembered
+        } else {
+            accounts.firstOrNull()?.id
+        }
+    }
+
     val currentAccount = accounts.firstOrNull { it.id == accountId }
 
     fun toast(msg: String) {
@@ -242,15 +267,19 @@ fun AddTransactionScreen(
                 horizontal = 8.dp, vertical = 4.dp
             )
         ) {
-            items(cats, key = { it.id }) { cat ->
+            items(topCats, key = { it.id }) { cat ->
                 val c = parseHexColor(cat.colorHex)
-                val selected = cat.id == categoryId
+                val selected = cat.id == selectedTopId
+                val hasChildren = allCategories.any { it.parentId == cat.id }
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     modifier = Modifier
                         .padding(vertical = 7.dp)
                         .clip(RoundedCornerShape(10.dp))
-                        .clickable { categoryId = cat.id }
+                        .clickable {
+                            // 有细分的弹面板让用户挑；没有细分的直接选中
+                            if (hasChildren) showSubCategoryFor = cat else categoryId = cat.id
+                        }
                 ) {
                     Box(
                         modifier = Modifier
@@ -277,6 +306,20 @@ fun AddTransactionScreen(
                     )
                 }
             }
+        }
+
+        // 分类网格里只高亮到一级，所以这里明确写出当前到底选的是哪个细分
+        val selectedPath = selectedCategory?.let { c ->
+            val parent = c.parentId?.let { pid -> allCategories.firstOrNull { it.id == pid } }
+            if (parent != null) "${parent.name} · ${c.name}" else c.name
+        }
+        if (selectedPath != null) {
+            Text(
+                "当前分类：$selectedPath",
+                style = MaterialTheme.typography.labelSmall,
+                color = TextSecondary,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp)
+            )
         }
 
         // ---------- 账户 / 日期 / 备注 ----------
@@ -318,12 +361,81 @@ fun AddTransactionScreen(
         Keypad(
             onKey = { key -> amountText = applyKey(amountText, key) },
             onBackspace = { amountText = amountText.dropLast(1) },
+            onClearAll = { amountText = "" },
             onDone = { save() }
         )
         Spacer(Modifier.height(4.dp))
     }
 
     /* ---------------- 弹层 ---------------- */
+
+    // ---------- 二级分类选择面板 ----------
+    showSubCategoryFor?.let { parent ->
+        val children = subCatsOf(parent.id)
+        val parentColor = parseHexColor(parent.colorHex)
+        AlertDialog(
+            onDismissRequest = { showSubCategoryFor = null },
+            title = { Text("${parent.name} · 选细分") },
+            text = {
+                Column {
+                    Text(
+                        "选一个更具体的，以后统计更清楚",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = TextSecondary
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    children.chunked(3).forEach { rowItems ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 3.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            rowItems.forEach { child ->
+                                val isSel = categoryId == child.id
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(
+                                            if (isSel) parentColor.copy(alpha = 0.18f)
+                                            else MaterialTheme.colorScheme.surfaceVariant
+                                        )
+                                        .clickable {
+                                            categoryId = child.id
+                                            showSubCategoryFor = null
+                                        }
+                                        .padding(vertical = 11.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        child.name,
+                                        style = MaterialTheme.typography.labelLarge,
+                                        color = if (isSel) parentColor else TextPrimary,
+                                        fontWeight = if (isSel) FontWeight.SemiBold else FontWeight.Normal,
+                                        maxLines = 1
+                                    )
+                                }
+                            }
+                            repeat(3 - rowItems.size) {
+                                Spacer(Modifier.weight(1f))
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showSubCategoryFor = null }) { Text("关闭") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    // 不细分，直接记在一级分类上
+                    categoryId = parent.id
+                    showSubCategoryFor = null
+                }) { Text("不细分") }
+            }
+        )
+    }
 
     if (showAccountPicker) {
         AlertDialog(
@@ -339,6 +451,7 @@ fun AddTransactionScreen(
                                 .clip(RoundedCornerShape(8.dp))
                                 .clickable {
                                     accountId = acc.id
+                                    accountTouched = true
                                     showAccountPicker = false
                                 }
                                 .padding(horizontal = 8.dp, vertical = 12.dp),
@@ -583,62 +696,81 @@ private fun applyKey(current: String, key: String): String {
     return if (next.length > 13) current else next
 }
 
+/**
+ * 数字键盘。
+ *
+ * 布局：左侧 3 列数字键，右侧 1 列功能键；「完成」跨两行高。
+ * 这样右下角只有一个提交按钮 —— 之前把同一个保存动作挂了两个按钮（保存/完成），
+ * 用户完全分不清区别，是设计失误。
+ */
 @Composable
 private fun Keypad(
     onKey: (String) -> Unit,
     onBackspace: () -> Unit,
+    onClearAll: () -> Unit,
     onDone: () -> Unit
 ) {
-    val rows = listOf(
+    val numberRows = listOf(
         listOf("1", "2", "3"),
         listOf("4", "5", "6"),
         listOf("7", "8", "9"),
         listOf(".", "0", "00")
     )
-    Column(
+    val rowHeight = 48.dp
+    // 每格实际占 键高 + 上下各 3dp 内边距
+    val gridHeight = rowHeight * numberRows.size + 6.dp * numberRows.size
+
+    Row(
         modifier = Modifier
             .fillMaxWidth()
             .background(CardBg)
             .padding(horizontal = 6.dp, vertical = 6.dp)
     ) {
-        rows.forEach { row ->
-            Row(modifier = Modifier.fillMaxWidth()) {
-                row.forEach { key ->
-                    KeyButton(
-                        label = key,
-                        modifier = Modifier.weight(1f),
-                        onClick = { onKey(key) }
-                    )
-                }
-                if (row.first() == "1") {
-                    FuncButton(
-                        label = "退格",
-                        icon = Icons.Filled.Backspace,
-                        modifier = Modifier.weight(1f),
-                        onClick = onBackspace
-                    )
-                } else if (row.first() == "4") {
-                    FuncButton(
-                        label = "清空",
-                        modifier = Modifier.weight(1f),
-                        onClick = { repeat(13) { onBackspace() } }
-                    )
-                } else if (row.first() == "7") {
-                    FuncButton(
-                        label = "保存",
-                        modifier = Modifier.weight(1f),
-                        highlight = true,
-                        onClick = onDone
-                    )
-                } else {
-                    FuncButton(
-                        label = "完成",
-                        modifier = Modifier.weight(1f),
-                        highlight = true,
-                        onClick = onDone
-                    )
+        // ---- 左侧：数字 ----
+        Column(modifier = Modifier.weight(3f)) {
+            numberRows.forEach { row ->
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    row.forEach { key ->
+                        KeyButton(
+                            label = key,
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(rowHeight),
+                            onClick = { onKey(key) }
+                        )
+                    }
                 }
             }
+        }
+        // ---- 右侧：退格 / 清空 / 完成（占满剩余两行）----
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .height(gridHeight)
+        ) {
+            FuncButton(
+                label = "退格",
+                icon = Icons.Filled.Backspace,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(rowHeight),
+                onClick = onBackspace
+            )
+            FuncButton(
+                label = "清空",
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(rowHeight),
+                onClick = onClearAll
+            )
+            FuncButton(
+                label = "完成",
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+                highlight = true,
+                onClick = onDone
+            )
         }
     }
 }
@@ -652,7 +784,6 @@ private fun KeyButton(
     Box(
         modifier = modifier
             .padding(3.dp)
-            .height(48.dp)
             .clip(RoundedCornerShape(10.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant)
             .clickable(onClick = onClick),
@@ -678,7 +809,6 @@ private fun FuncButton(
     Box(
         modifier = modifier
             .padding(3.dp)
-            .height(48.dp)
             .clip(RoundedCornerShape(10.dp))
             .background(if (highlight) BrandGreen else Color(0xFFE3E6EA))
             .clickable(onClick = onClick),

@@ -38,11 +38,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.local.moneynote.AppViewModel
+import com.local.moneynote.Granularity
 import com.local.moneynote.core.Dates
 import com.local.moneynote.core.Money
 import com.local.moneynote.data.TransactionRow
 import com.local.moneynote.data.TxKind
-import com.local.moneynote.ui.components.MonthSwitcher
+import com.local.moneynote.ui.components.PeriodBar
 import com.local.moneynote.ui.components.TransactionRowCard
 import com.local.moneynote.ui.theme.BrandGreen
 import com.local.moneynote.ui.theme.BrandGreenLight
@@ -55,21 +56,22 @@ fun TransactionListScreen(
     onEdit: (Long) -> Unit,
     onSearch: () -> Unit
 ) {
-    val year by vm.year.collectAsState()
-    val month by vm.month.collectAsState()
-    val rows by vm.monthTransactions.collectAsState()
-    val expense by vm.monthExpense.collectAsState()
-    val income by vm.monthIncome.collectAsState()
+    val granularity by vm.granularity.collectAsState()
+    val rows by vm.periodTransactions.collectAsState()
+    val expense by vm.periodExpense.collectAsState()
+    val income by vm.periodIncome.collectAsState()
 
     var deleteTarget by remember { mutableStateOf<TransactionRow?>(null) }
     val scope = rememberCoroutineScope()
 
     Column(modifier = Modifier.fillMaxSize()) {
-        MonthSwitcher(
-            label = Dates.labelMonth(year, month),
-            isCurrent = vm.isCurrentMonth(),
-            onPrev = { vm.shiftMonth(-1) },
-            onNext = { vm.shiftMonth(1) },
+        PeriodBar(
+            granularity = granularity,
+            label = vm.periodLabel(),
+            isCurrent = vm.isCurrentPeriod(),
+            onGranularityChange = { vm.setGranularity(it) },
+            onPrev = { vm.shiftPeriod(-1) },
+            onNext = { vm.shiftPeriod(1) },
             onTitleClick = { vm.goToToday() },
             trailing = {
                 IconButton(onClick = onSearch) {
@@ -78,15 +80,23 @@ fun TransactionListScreen(
             }
         )
 
-        MonthSummaryCard(expense = expense, income = income)
+        PeriodSummaryCard(
+            expense = expense,
+            income = income,
+            title = when (granularity) {
+                Granularity.YEAR -> "本年支出"
+                Granularity.MONTH -> "本月支出"
+                Granularity.DAY -> "本日支出"
+            }
+        )
 
-        val grouped = remember(rows) { rows.groupBy { Dates.startOfDay(it.occurredAt) } }
+        val groups = remember(rows, granularity) { groupTransactions(rows, granularity) }
 
-        if (grouped.isEmpty()) {
+        if (groups.isEmpty()) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(
-                        "这个月还没有账",
+                        "这段时间还没有账",
                         style = MaterialTheme.typography.titleSmall,
                         color = TextSecondary
                     )
@@ -103,11 +113,13 @@ fun TransactionListScreen(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 100.dp)
             ) {
-                grouped.forEach { (dayStart, dayRows) ->
-                    item(key = "day-$dayStart") {
-                        DayHeader(dayStart = dayStart, rows = dayRows)
+                groups.forEach { (title, groupRows) ->
+                    if (title.isNotEmpty()) {
+                        item(key = "h-$title") {
+                            GroupHeader(title = title, rows = groupRows)
+                        }
                     }
-                    items(items = dayRows, key = { it.id }) { row ->
+                    items(items = groupRows, key = { it.id }) { row ->
                         TransactionRowCard(
                             row = row,
                             onClick = { onEdit(row.id) },
@@ -153,7 +165,7 @@ fun TransactionListScreen(
 }
 
 @Composable
-private fun MonthSummaryCard(expense: Long, income: Long) {
+private fun PeriodSummaryCard(expense: Long, income: Long, title: String) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -164,7 +176,7 @@ private fun MonthSummaryCard(expense: Long, income: Long) {
     ) {
         Column {
             Text(
-                "本月支出",
+                title,
                 color = Color.White.copy(alpha = 0.85f),
                 style = MaterialTheme.typography.labelMedium
             )
@@ -207,10 +219,11 @@ private fun MonthSummaryCard(expense: Long, income: Long) {
     }
 }
 
+/** 分组头：年视图按月分组、月视图按日分组，显示该组小计 */
 @Composable
-private fun DayHeader(dayStart: Long, rows: List<TransactionRow>) {
-    val dayExpense = rows.filter { it.kind == TxKind.EXPENSE }.sumOf { it.amountCents }
-    val dayIncome = rows.filter { it.kind == TxKind.INCOME }.sumOf { it.amountCents }
+private fun GroupHeader(title: String, rows: List<TransactionRow>) {
+    val groupExpense = rows.filter { it.kind == TxKind.EXPENSE }.sumOf { it.amountCents }
+    val groupIncome = rows.filter { it.kind == TxKind.INCOME }.sumOf { it.amountCents }
 
     Row(
         modifier = Modifier
@@ -220,27 +233,54 @@ private fun DayHeader(dayStart: Long, rows: List<TransactionRow>) {
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
-            text = "${Dates.labelDay(dayStart)}  ${Dates.labelWeekday(dayStart)}",
+            text = title,
             style = MaterialTheme.typography.labelLarge,
             color = TextSecondary,
             fontWeight = FontWeight.Medium
         )
         Row {
-            if (dayExpense > 0) {
+            if (groupExpense > 0) {
                 Text(
-                    "支出 " + Money.format(dayExpense),
+                    "支出 " + Money.format(groupExpense),
                     style = MaterialTheme.typography.labelSmall,
                     color = TextSecondary
                 )
             }
-            if (dayExpense > 0 && dayIncome > 0) Spacer(Modifier.width(10.dp))
-            if (dayIncome > 0) {
+            if (groupExpense > 0 && groupIncome > 0) Spacer(Modifier.width(10.dp))
+            if (groupIncome > 0) {
                 Text(
-                    "收入 " + Money.format(dayIncome),
+                    "收入 " + Money.format(groupIncome),
                     style = MaterialTheme.typography.labelSmall,
                     color = TextSecondary
                 )
             }
         }
     }
+}
+
+/**
+ * 按粒度把账单分组。
+ * 年视图按月分，月视图按日分；日视图只有一天，不需要分组头。
+ * rows 已按时间倒序，groupBy 保持插入顺序，所以分组顺序也是倒序的。
+ */
+private fun groupTransactions(
+    rows: List<TransactionRow>,
+    granularity: Granularity
+): List<Pair<String, List<TransactionRow>>> = when (granularity) {
+    Granularity.YEAR ->
+        rows.groupBy { tx ->
+            val d = Dates.toLocalDate(tx.occurredAt)
+            d.year * 100 + d.monthValue
+        }.map { (yearMonth, list) ->
+            Dates.labelMonth(yearMonth / 100, yearMonth % 100) to list
+        }
+
+    Granularity.MONTH ->
+        rows.groupBy { Dates.startOfDay(it.occurredAt) }
+            .map { (dayStart, list) ->
+                "${Dates.labelDay(dayStart)}  ${Dates.labelWeekday(dayStart)}" to list
+            }
+
+    Granularity.DAY ->
+        if (rows.isEmpty()) emptyList() else listOf("" to rows)
 }

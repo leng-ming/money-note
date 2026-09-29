@@ -34,12 +34,19 @@ data class AccountEntity(
     @ColumnInfo(name = "created_at") val createdAt: Long = System.currentTimeMillis()
 )
 
-/** 分类。isSystem 的预置分类不允许删除，只能改图标/颜色 */
+/**
+ * 分类。支持两级：
+ * - parentId == null → 一级分类（餐饮、交通…）
+ * - parentId != null → 二级分类（奶茶、咖啡…），挂在某个一级分类下
+ *
+ * isSystem 的预置分类不允许删除，只能改图标/颜色
+ */
 @Entity(tableName = "categories")
 data class CategoryEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0L,
     val name: String,
     val kind: TxKind,
+    @ColumnInfo(name = "parent_id") val parentId: Long? = null,
     @ColumnInfo(name = "icon_key") val iconKey: String = "more",
     @ColumnInfo(name = "color_hex") val colorHex: String = "#FF607D8B",
     @ColumnInfo(name = "sort_order") val sortOrder: Int = 0,

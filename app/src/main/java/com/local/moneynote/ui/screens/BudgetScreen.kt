@@ -80,7 +80,7 @@ fun BudgetScreen(
     val year by vm.year.collectAsState()
     val month by vm.month.collectAsState()
     val budgets by vm.budgets.collectAsState()
-    val expenseCats by vm.expenseByCategory.collectAsState()
+    val expenseCats by vm.monthExpenseByCategory.collectAsState()
     val expense by vm.monthExpense.collectAsState()
     val categories by vm.allCategories.collectAsState()
     val scope = rememberCoroutineScope()

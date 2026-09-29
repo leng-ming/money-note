@@ -40,6 +40,9 @@ data class CategorySum(
 
 data class DaySum(val day: String, val totalCents: Long)
 
+/** 按「年-月」汇总，年视图的趋势图用 */
+data class MonthSum(val month: String, val totalCents: Long)
+
 /* ------------------------------------------------------------------ */
 /*  DAO                                                                */
 /* ------------------------------------------------------------------ */
@@ -80,14 +83,18 @@ interface AccountDao {
 
 @Dao
 interface CategoryDao {
-    @Query("SELECT * FROM categories WHERE archived = 0 ORDER BY kind, sort_order, id")
+    /** 只返回一级分类：筛选器、预算、统计归并都按一级走，避免几十个细分把界面撑爆 */
+    @Query("SELECT * FROM categories WHERE archived = 0 AND parent_id IS NULL ORDER BY kind, sort_order, id")
     fun observeActive(): Flow<List<CategoryEntity>>
 
-    @Query("SELECT * FROM categories WHERE kind = :kind AND archived = 0 ORDER BY sort_order, id")
+    @Query("SELECT * FROM categories WHERE kind = :kind AND archived = 0 AND parent_id IS NULL ORDER BY sort_order, id")
     fun observeByKind(kind: TxKind): Flow<List<CategoryEntity>>
 
-    @Query("SELECT * FROM categories ORDER BY kind, archived, sort_order, id")
+    @Query("SELECT * FROM categories ORDER BY kind, archived, parent_id IS NOT NULL, sort_order, id")
     fun observeAll(): Flow<List<CategoryEntity>>
+
+    @Query("SELECT * FROM categories WHERE parent_id = :parentId AND archived = 0 ORDER BY sort_order, id")
+    fun observeChildren(parentId: Long): Flow<List<CategoryEntity>>
 
     @Query("SELECT * FROM categories WHERE id = :id")
     suspend fun byId(id: Long): CategoryEntity?
@@ -133,10 +140,13 @@ interface TransactionDao {
         "SELECT t.id AS id, t.amount_cents AS amountCents, t.kind AS kind, " +
             "t.account_id AS accountId, t.category_id AS categoryId, t.note AS note, " +
             "t.occurred_at AS occurredAt, t.exclude_from_stats AS excludeFromStats, " +
-            "c.name AS categoryName, c.icon_key AS categoryIcon, c.color_hex AS categoryColor, " +
+            "c.name AS categoryName, " +
+            "COALESCE(p.icon_key, c.icon_key) AS categoryIcon, " +
+            "COALESCE(p.color_hex, c.color_hex) AS categoryColor, " +
             "a.name AS accountName " +
             "FROM transactions t " +
             "JOIN categories c ON c.id = t.category_id " +
+            "LEFT JOIN categories p ON p.id = c.parent_id " +
             "JOIN accounts a ON a.id = t.account_id " +
             "WHERE t.occurred_at >= :start AND t.occurred_at < :end " +
             "ORDER BY t.occurred_at DESC, t.id DESC"
@@ -147,10 +157,13 @@ interface TransactionDao {
         "SELECT t.id AS id, t.amount_cents AS amountCents, t.kind AS kind, " +
             "t.account_id AS accountId, t.category_id AS categoryId, t.note AS note, " +
             "t.occurred_at AS occurredAt, t.exclude_from_stats AS excludeFromStats, " +
-            "c.name AS categoryName, c.icon_key AS categoryIcon, c.color_hex AS categoryColor, " +
+            "c.name AS categoryName, " +
+            "COALESCE(p.icon_key, c.icon_key) AS categoryIcon, " +
+            "COALESCE(p.color_hex, c.color_hex) AS categoryColor, " +
             "a.name AS accountName " +
             "FROM transactions t " +
             "JOIN categories c ON c.id = t.category_id " +
+            "LEFT JOIN categories p ON p.id = c.parent_id " +
             "JOIN accounts a ON a.id = t.account_id " +
             "WHERE t.occurred_at >= :start AND t.occurred_at < :end " +
             "AND (:keyword = '' OR t.note LIKE '%' || :keyword || '%' OR c.name LIKE '%' || :keyword || '%') " +
@@ -180,12 +193,17 @@ interface TransactionDao {
     fun observeTotal(kind: TxKind, start: Long, end: Long): Flow<Long>
 
     @Query(
-        "SELECT c.id AS categoryId, c.name AS name, c.icon_key AS iconKey, c.color_hex AS colorHex, " +
+        "SELECT COALESCE(p.id, c.id) AS categoryId, " +
+            "COALESCE(p.name, c.name) AS name, " +
+            "COALESCE(p.icon_key, c.icon_key) AS iconKey, " +
+            "COALESCE(p.color_hex, c.color_hex) AS colorHex, " +
             "SUM(t.amount_cents) AS totalCents, COUNT(t.id) AS cnt " +
-            "FROM transactions t JOIN categories c ON c.id = t.category_id " +
+            "FROM transactions t " +
+            "JOIN categories c ON c.id = t.category_id " +
+            "LEFT JOIN categories p ON p.id = c.parent_id " +
             "WHERE t.kind = :kind AND t.exclude_from_stats = 0 " +
             "AND t.occurred_at >= :start AND t.occurred_at < :end " +
-            "GROUP BY c.id ORDER BY totalCents DESC"
+            "GROUP BY COALESCE(p.id, c.id) ORDER BY totalCents DESC"
     )
     fun observeSumByCategory(kind: TxKind, start: Long, end: Long): Flow<List<CategorySum>>
 
@@ -210,6 +228,31 @@ interface TransactionDao {
 
     @Query("SELECT COUNT(*) FROM transactions")
     suspend fun countAll(): Int
+
+    /**
+     * 某分类最近一次使用的账户。
+     * 记账时用它自动带出账户，省得每次重复选择（午饭用微信，晚饭大概率还是微信）。
+     */
+    @Query(
+        "SELECT account_id FROM transactions WHERE category_id = :categoryId " +
+            "ORDER BY occurred_at DESC, id DESC LIMIT 1"
+    )
+    suspend fun lastAccountIdForCategory(categoryId: Long): Long?
+
+    /** 全局最近一次使用的账户，作为分类没有历史记录时的兜底 */
+    @Query("SELECT account_id FROM transactions ORDER BY occurred_at DESC, id DESC LIMIT 1")
+    suspend fun lastAccountId(): Long?
+
+    /** 某年各月的支出/收入汇总，供「年」视图的趋势图使用 */
+    @Query(
+        "SELECT strftime('%Y-%m', occurred_at / 1000, 'unixepoch', 'localtime') AS month, " +
+            "SUM(amount_cents) AS totalCents " +
+            "FROM transactions " +
+            "WHERE kind = :kind AND exclude_from_stats = 0 " +
+            "AND occurred_at >= :start AND occurred_at < :end " +
+            "GROUP BY month ORDER BY month ASC"
+    )
+    fun observeSumByMonth(kind: TxKind, start: Long, end: Long): Flow<List<MonthSum>>
 }
 
 @Dao

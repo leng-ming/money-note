@@ -70,6 +70,24 @@ class MoneyRepository(private val db: AppDatabase) {
     suspend fun categoryTxCount(id: Long) = categories.txCount(id)
     suspend fun deleteCategory(e: CategoryEntity) = categories.delete(e)
 
+    /** 在某个一级分类下新增二级细分；kind 与图标配色都继承父分类 */
+    suspend fun addSubCategory(parentId: Long, name: String, iconKey: String, colorHex: String): Long {
+        val all = categories.allOnce()
+        val parent = all.firstOrNull { it.id == parentId } ?: return -1L
+        val siblings = all.filter { it.parentId == parentId }
+        val nextOrder = (siblings.maxOfOrNull { it.sortOrder } ?: -1) + 1
+        return categories.insert(
+            CategoryEntity(
+                name = name.trim(),
+                kind = parent.kind,
+                parentId = parentId,
+                iconKey = iconKey,
+                colorHex = colorHex,
+                sortOrder = nextOrder
+            )
+        )
+    }
+
     /* ---------------- 账单 ---------------- */
 
     fun observeTransactions(start: Long, end: Long): Flow<List<TransactionRow>> =
@@ -91,10 +109,22 @@ class MoneyRepository(private val db: AppDatabase) {
     fun observeSumByDay(kind: TxKind, start: Long, end: Long): Flow<List<DaySum>> =
         transactions.observeSumByDay(kind, start, end)
 
+    fun observeSumByMonth(kind: TxKind, start: Long, end: Long): Flow<List<MonthSum>> =
+        transactions.observeSumByMonth(kind, start, end)
+
     fun observeSpent(categoryId: Long?, start: Long, end: Long): Flow<Long> =
         transactions.observeSpent(categoryId, start, end)
 
     suspend fun transactionById(id: Long) = transactions.byId(id)
+
+    /**
+     * 记账时预选账户用：优先返回该分类上次使用的账户。
+     * 没有任何历史时返回 null，由界面退回第一个账户。
+     */
+    suspend fun lastAccountIdForCategory(categoryId: Long): Long? =
+        transactions.lastAccountIdForCategory(categoryId)
+
+    suspend fun lastAccountId(): Long? = transactions.lastAccountId()
 
     suspend fun addTransaction(
         amountCents: Long, kind: TxKind, accountId: Long, categoryId: Long,

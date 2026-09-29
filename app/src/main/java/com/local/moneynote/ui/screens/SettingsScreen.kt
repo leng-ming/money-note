@@ -28,6 +28,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.GridOn
@@ -211,7 +212,8 @@ fun SettingsScreen(
         item {
             SectionCard(title = "支出分类") {
                 CategoryGrid(
-                    list = categories.filter { it.kind == TxKind.EXPENSE },
+                    // 只列一级分类，二级细分在各自的编辑对话框里管理
+                    list = categories.filter { it.kind == TxKind.EXPENSE && it.parentId == null },
                     onClick = {
                         editCategory = it
                         showCategoryEditor = true
@@ -227,7 +229,7 @@ fun SettingsScreen(
         item {
             SectionCard(title = "收入分类") {
                 CategoryGrid(
-                    list = categories.filter { it.kind == TxKind.INCOME },
+                    list = categories.filter { it.kind == TxKind.INCOME && it.parentId == null },
                     onClick = {
                         editCategory = it
                         showCategoryEditor = true
@@ -338,6 +340,8 @@ fun SettingsScreen(
     if (showCategoryEditor) {
         CategoryEditorDialog(
             initial = editCategory,
+            children = editCategory?.let { parent -> categories.filter { it.parentId == parent.id } }
+                ?: emptyList(),
             onDismiss = { showCategoryEditor = false },
             onSave = { name, iconKey, colorHex, kind ->
                 scope.launch {
@@ -361,9 +365,30 @@ fun SettingsScreen(
                         if (count > 0) {
                             toast("该分类下还有 $count 笔账，不能删除")
                         } else {
+                            // 连带清掉它下面的二级细分，免得留下孤儿行
+                            categories.filter { it.parentId == editing.id }
+                                .forEach { vm.repo.deleteCategory(it) }
                             vm.repo.deleteCategory(editing)
                             toast("已删除")
                         }
+                    }
+                }
+            },
+            onAddChild = { childName ->
+                val parent = editCategory
+                if (parent != null) {
+                    scope.launch {
+                        vm.repo.addSubCategory(parent.id, childName, parent.iconKey, parent.colorHex)
+                    }
+                }
+            },
+            onDeleteChild = { child ->
+                scope.launch {
+                    val count = vm.repo.categoryTxCount(child.id)
+                    if (count > 0) {
+                        toast("「${child.name}」下还有 $count 笔账，不能删除")
+                    } else {
+                        vm.repo.deleteCategory(child)
                     }
                 }
             }
@@ -665,14 +690,18 @@ private fun AccountEditorDialog(
 @Composable
 private fun CategoryEditorDialog(
     initial: CategoryEntity?,
+    children: List<CategoryEntity>,
     onDismiss: () -> Unit,
     onSave: (name: String, iconKey: String, colorHex: String, kind: TxKind) -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    onAddChild: (String) -> Unit,
+    onDeleteChild: (CategoryEntity) -> Unit
 ) {
     var name by remember { mutableStateOf(initial?.name ?: "") }
     var iconKey by remember { mutableStateOf(initial?.iconKey ?: "more") }
     var colorHex by remember { mutableStateOf(initial?.colorHex ?: PRESET_COLORS.first()) }
     var kind by remember { mutableStateOf(initial?.kind ?: TxKind.EXPENSE) }
+    var newChildName by remember { mutableStateOf("") }
 
     val accent = parseHexColor(colorHex)
 
@@ -781,6 +810,83 @@ private fun CategoryEditorDialog(
                                     .clickable { colorHex = hex }
                             )
                         }
+                    }
+                }
+
+                // ---- 二级细分管理（只有已保存的一级分类才能挂细分）----
+                if (initial != null) {
+                    Spacer(Modifier.height(16.dp))
+                    Text("细分分类", style = MaterialTheme.typography.labelMedium, color = TextSecondary)
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "记账时点「${initial.name}」会弹出这些细分，方便把账记到奶茶、咖啡这一层",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = TextSecondary
+                    )
+                    Spacer(Modifier.height(8.dp))
+
+                    if (children.isEmpty()) {
+                        Text(
+                            "还没有细分",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = TextSecondary
+                        )
+                    } else {
+                        children.chunked(3).forEach { rowItems ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 3.dp),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                rowItems.forEach { child ->
+                                    Row(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clip(RoundedCornerShape(10.dp))
+                                            .background(accent.copy(alpha = 0.12f))
+                                            .padding(horizontal = 8.dp, vertical = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            child.name,
+                                            style = MaterialTheme.typography.labelMedium,
+                                            color = TextPrimary,
+                                            maxLines = 1,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        Icon(
+                                            Icons.Filled.Close,
+                                            contentDescription = "删除细分",
+                                            tint = TextSecondary,
+                                            modifier = Modifier
+                                                .size(15.dp)
+                                                .clickable { onDeleteChild(child) }
+                                        )
+                                    }
+                                }
+                                repeat(3 - rowItems.size) { Spacer(Modifier.weight(1f)) }
+                            }
+                        }
+                    }
+
+                    Spacer(Modifier.height(10.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedTextField(
+                            value = newChildName,
+                            onValueChange = { if (it.length <= 6) newChildName = it },
+                            label = { Text("新增细分") },
+                            singleLine = true,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        TextButton(onClick = {
+                            val n = newChildName.trim()
+                            if (n.isNotEmpty()) {
+                                onAddChild(n)
+                                newChildName = ""
+                            }
+                        }) { Text("添加") }
                     }
                 }
             }

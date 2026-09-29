@@ -5,6 +5,7 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
+import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
@@ -15,7 +16,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         BudgetEntity::class,
         RecurringEntity::class
     ],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -39,9 +40,23 @@ abstract class AppDatabase : RoomDatabase() {
                     "money_note.db"
                 )
                     .addCallback(SeedCallback)
+                    .addMigrations(MIGRATION_1_2)
                     .build()
                     .also { INSTANCE = it }
             }
+
+        /**
+         * v1 → v2：分类表加入 parent_id，支持二级分类，并给预置的一级分类补上常用细分。
+         *
+         * 这是纯增量迁移：只 ALTER 加一列 + 插入新的二级分类行，
+         * 老账单、老账户、老预算一条都不会动。
+         */
+        private val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE categories ADD COLUMN parent_id INTEGER")
+                seedSubCategories(db)
+            }
+        }
 
         /**
          * 首次建库时写入默认账户与分类。
@@ -52,6 +67,7 @@ abstract class AppDatabase : RoomDatabase() {
                 super.onCreate(db)
                 seedAccounts(db)
                 seedCategories(db)
+                seedSubCategories(db)
             }
 
             private fun seedAccounts(db: SupportSQLiteDatabase) {
@@ -97,6 +113,62 @@ abstract class AppDatabase : RoomDatabase() {
                         "INSERT INTO categories (name, kind, icon_key, color_hex, sort_order, archived, is_system) " +
                             "VALUES (?, ?, ?, ?, ?, 0, 1)",
                         arrayOf(c[0], c[1], c[2], c[3], index % 10)
+                    )
+                }
+            }
+        }
+
+        /** 一级分类 → 常用二级细分的预置表 */
+        private val SUB_CATEGORY_SEEDS: List<Triple<TxKind, String, List<String>>> = listOf(
+            Triple(TxKind.EXPENSE, "餐饮", listOf("早餐", "午餐", "晚餐", "奶茶", "咖啡", "零食", "水果", "外卖", "烟酒")),
+            Triple(TxKind.EXPENSE, "交通", listOf("公交地铁", "打车", "加油", "停车", "过路费", "共享单车")),
+            Triple(TxKind.EXPENSE, "购物", listOf("日用品", "服饰", "数码", "美妆", "家居")),
+            Triple(TxKind.EXPENSE, "居住", listOf("房租", "水电", "燃气", "物业", "宽带")),
+            Triple(TxKind.EXPENSE, "通讯", listOf("话费", "流量")),
+            Triple(TxKind.EXPENSE, "娱乐", listOf("电影", "游戏", "旅游", "运动", "KTV")),
+            Triple(TxKind.EXPENSE, "医疗", listOf("挂号", "药品", "体检")),
+            Triple(TxKind.EXPENSE, "教育", listOf("书籍", "课程", "培训")),
+            Triple(TxKind.EXPENSE, "人情", listOf("红包", "礼物", "请客")),
+            Triple(TxKind.INCOME, "理财", listOf("利息", "基金", "股票"))
+        )
+
+        /**
+         * 给一级分类挂上二级细分。二级分类继承一级的图标与配色，免得记账页的颜色花掉。
+         * 幂等：同一父分类下已存在的细分不会重复插入（首次建库和 v1→v2 迁移都会调用它）。
+         */
+        private fun seedSubCategories(db: SupportSQLiteDatabase) {
+            SUB_CATEGORY_SEEDS.forEach { (kind, parentName, children) ->
+                var parentId = -1L
+                var iconKey = "more"
+                var colorHex = "#FF757575"
+
+                db.query(
+                    "SELECT id, icon_key, color_hex FROM categories " +
+                        "WHERE name = ? AND kind = ? AND parent_id IS NULL LIMIT 1",
+                    arrayOf(parentName, kind.name)
+                ).use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        parentId = cursor.getLong(0)
+                        iconKey = cursor.getString(1) ?: "more"
+                        colorHex = cursor.getString(2) ?: "#FF757575"
+                    }
+                }
+                if (parentId < 0L) return@forEach
+
+                children.forEachIndexed { index, childName ->
+                    var exists = false
+                    db.query(
+                        "SELECT COUNT(*) FROM categories WHERE parent_id = ? AND name = ?",
+                        arrayOf(parentId, childName)
+                    ).use { c ->
+                        if (c.moveToFirst()) exists = c.getInt(0) > 0
+                    }
+                    if (exists) return@forEachIndexed
+
+                    db.execSQL(
+                        "INSERT INTO categories (name, kind, parent_id, icon_key, color_hex, sort_order, archived, is_system) " +
+                            "VALUES (?, ?, ?, ?, ?, ?, 0, 1)",
+                        arrayOf(childName, kind.name, parentId, iconKey, colorHex, index)
                     )
                 }
             }

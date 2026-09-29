@@ -36,6 +36,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.local.moneynote.AppViewModel
+import com.local.moneynote.Granularity
 import com.local.moneynote.core.Dates
 import com.local.moneynote.core.Money
 import com.local.moneynote.data.CategorySum
@@ -44,7 +45,7 @@ import com.local.moneynote.ui.components.ChartSlice
 import com.local.moneynote.ui.components.DayBarChart
 import com.local.moneynote.ui.components.DonutChart
 import com.local.moneynote.ui.components.EmptyHint
-import com.local.moneynote.ui.components.MonthSwitcher
+import com.local.moneynote.ui.components.PeriodBar
 import com.local.moneynote.ui.components.RatioBar
 import com.local.moneynote.ui.components.SectionCard
 import com.local.moneynote.ui.parseHexColor
@@ -59,11 +60,13 @@ import com.local.moneynote.ui.theme.TextSecondary
 fun StatsScreen(vm: AppViewModel) {
     val year by vm.year.collectAsState()
     val month by vm.month.collectAsState()
-    val expense by vm.monthExpense.collectAsState()
-    val income by vm.monthIncome.collectAsState()
+    val granularity by vm.granularity.collectAsState()
+    val expense by vm.periodExpense.collectAsState()
+    val income by vm.periodIncome.collectAsState()
     val expenseCats by vm.expenseByCategory.collectAsState()
     val incomeCats by vm.incomeByCategory.collectAsState()
     val byDay by vm.expenseByDay.collectAsState()
+    val byMonth by vm.expenseByMonth.collectAsState()
 
     var showIncome by remember { mutableStateOf(false) }
 
@@ -75,6 +78,7 @@ fun StatsScreen(vm: AppViewModel) {
         cats.map { ChartSlice(it.name, it.totalCents, parseHexColor(it.colorHex)) }
     }
 
+    // 月视图：每天一根柱子
     val dayValues = remember(byDay, daysInMonth) {
         val arr = MutableList(daysInMonth) { 0L }
         byDay.forEach { ds ->
@@ -84,16 +88,28 @@ fun StatsScreen(vm: AppViewModel) {
         arr
     }
 
+    // 年视图：每月一根柱子
+    val monthValues = remember(byMonth) {
+        val arr = MutableList(12) { 0L }
+        byMonth.forEach { ms ->
+            val m = ms.month.substringAfterLast('-').toIntOrNull()
+            if (m != null && m in 1..12) arr[m - 1] = ms.totalCents
+        }
+        arr
+    }
+
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(bottom = 100.dp)
     ) {
         item {
-            MonthSwitcher(
-                label = Dates.labelMonth(year, month),
-                isCurrent = vm.isCurrentMonth(),
-                onPrev = { vm.shiftMonth(-1) },
-                onNext = { vm.shiftMonth(1) },
+            PeriodBar(
+                granularity = granularity,
+                label = vm.periodLabel(),
+                isCurrent = vm.isCurrentPeriod(),
+                onGranularityChange = { vm.setGranularity(it) },
+                onPrev = { vm.shiftPeriod(-1) },
+                onNext = { vm.shiftPeriod(1) },
                 onTitleClick = { vm.goToToday() }
             )
         }
@@ -140,41 +156,47 @@ fun StatsScreen(vm: AppViewModel) {
             }
         }
 
-        item {
-            SectionCard(title = "每日支出趋势") {
-                if (expense <= 0L) {
-                    EmptyHint("本月还没有支出")
-                } else {
-                    DayBarChart(
-                        values = dayValues,
-                        barColor = BrandGreen,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(118.dp)
-                    )
-                    Spacer(Modifier.height(6.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text("1日", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
-                        Text(
-                            "${daysInMonth / 2}日",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = TextSecondary
+        // 趋势图：年视图看每月、月视图看每日；日视图只有一天，没有趋势可言
+        if (granularity != Granularity.DAY) {
+            item {
+                SectionCard(
+                    title = if (granularity == Granularity.YEAR) "每月支出趋势" else "每日支出趋势"
+                ) {
+                    if (expense <= 0L) {
+                        EmptyHint("这段时间还没有支出")
+                    } else {
+                        DayBarChart(
+                            values = if (granularity == Granularity.YEAR) monthValues else dayValues,
+                            barColor = BrandGreen,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(118.dp)
                         )
-                        Text(
-                            "${daysInMonth}日",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = TextSecondary
-                        )
+                        Spacer(Modifier.height(6.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            val labels = if (granularity == Granularity.YEAR) {
+                                listOf("1月", "6月", "12月")
+                            } else {
+                                listOf("1日", "${daysInMonth / 2}日", "${daysInMonth}日")
+                            }
+                            labels.forEach {
+                                Text(
+                                    it,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = TextSecondary
+                                )
+                            }
+                        }
                     }
                 }
             }
         }
 
         if (cats.isEmpty()) {
-            item { EmptyHint("本月还没有数据") }
+            item { EmptyHint("这段时间还没有数据") }
         } else {
             item {
                 Text(
