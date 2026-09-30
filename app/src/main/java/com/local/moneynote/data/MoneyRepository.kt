@@ -11,7 +11,9 @@ data class BackupPayload(
     val categories: List<CategoryEntity>,
     val transactions: List<TransactionEntity>,
     val budgets: List<BudgetEntity>,
-    val recurring: List<RecurringEntity>
+    val recurring: List<RecurringEntity>,
+    /** 给默认值，这样 v1.1 之前导出的老备份文件仍然能正常解析 */
+    val budgetCarryovers: List<BudgetCarryoverEntity> = emptyList()
 )
 
 /**
@@ -25,6 +27,7 @@ class MoneyRepository(private val db: AppDatabase) {
     private val transactions = db.transactionDao()
     private val budgets = db.budgetDao()
     private val recurring = db.recurringDao()
+    private val carryovers = db.budgetCarryoverDao()
 
     /* ---------------- 账户 ---------------- */
 
@@ -163,6 +166,57 @@ class MoneyRepository(private val db: AppDatabase) {
 
     suspend fun deleteBudget(e: BudgetEntity) = budgets.delete(e)
 
+    /* ---------------- 预算转结 ---------------- */
+
+    /** 某月（某分类）从以前月份转进来的预算总额 */
+    fun observeCarryoverIncoming(categoryId: Long?, year: Int, month: Int): Flow<Long> =
+        carryovers.observeIncoming(categoryId, year, month)
+
+    /** 某月是否已经往外转过（按钮据此显示「已转结」） */
+    fun observeCarryoverOutgoingExists(categoryId: Long?, year: Int, month: Int): Flow<Boolean> =
+        carryovers.observeOutgoingExists(categoryId, year, month)
+
+    /**
+     * 把某月剩余的预算转结到下个月。
+     *
+     * 同一来源月份只允许转一次，否则用户连点几下就会把同一笔剩余重复叠加。
+     * 返回 false 表示没转（金额为 0 或之前已经转过）。
+     */
+    suspend fun carryOverBudget(
+        categoryId: Long?,
+        fromYear: Int,
+        fromMonth: Int,
+        amountCents: Long
+    ): Boolean {
+        if (amountCents <= 0L) return false
+        val already = carryovers.allOnce().any {
+            it.categoryId == categoryId && it.fromYear == fromYear && it.fromMonth == fromMonth
+        }
+        if (already) return false
+
+        val (toYear, toMonth) = Dates.shiftMonth(fromYear, fromMonth, 1)
+        carryovers.insert(
+            BudgetCarryoverEntity(
+                categoryId = categoryId,
+                fromYear = fromYear,
+                fromMonth = fromMonth,
+                toYear = toYear,
+                toMonth = toMonth,
+                amountCents = amountCents
+            )
+        )
+        return true
+    }
+
+    /** 撤销某月往外转的记录（转错了可以撤回） */
+    suspend fun undoCarryOver(categoryId: Long?, fromYear: Int, fromMonth: Int) {
+        carryovers.allOnce()
+            .filter {
+                it.categoryId == categoryId && it.fromYear == fromYear && it.fromMonth == fromMonth
+            }
+            .forEach { carryovers.delete(it) }
+    }
+
     /* ---------------- 周期账单 ---------------- */
 
     fun observeRecurring(): Flow<List<RecurringEntity>> = recurring.observeAll()
@@ -208,7 +262,8 @@ class MoneyRepository(private val db: AppDatabase) {
         categories = categories.allOnce(),
         transactions = transactions.all(),
         budgets = budgets.allOnce(),
-        recurring = recurring.allOnce()
+        recurring = recurring.allOnce(),
+        budgetCarryovers = carryovers.allOnce()
     )
 
     /**
@@ -231,5 +286,6 @@ class MoneyRepository(private val db: AppDatabase) {
         payload.transactions.forEach { transactions.insert(it) }
         payload.budgets.forEach { budgets.insert(it) }
         payload.recurring.forEach { recurring.insert(it) }
+        payload.budgetCarryovers.forEach { carryovers.insert(it) }
     }
 }

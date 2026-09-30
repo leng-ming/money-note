@@ -87,6 +87,25 @@ data class BudgetEntity(
     @ColumnInfo(name = "created_at") val createdAt: Long = System.currentTimeMillis()
 )
 
+/**
+ * 预算转结记录：把某个自然月没用完的预算挪到下个月。
+ *
+ * 单独建表而不是给 BudgetEntity 加字段，是因为两者生命周期不同：
+ * 预算是「每月复用的一份设置」，而转结是逐月累积的历史，需要记住每一笔的来源月份。
+ */
+@Entity(tableName = "budget_carryovers")
+data class BudgetCarryoverEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0L,
+    /** null = 总预算；非 null = 该分类的预算 */
+    @ColumnInfo(name = "category_id") val categoryId: Long? = null,
+    @ColumnInfo(name = "from_year") val fromYear: Int,
+    @ColumnInfo(name = "from_month") val fromMonth: Int,
+    @ColumnInfo(name = "to_year") val toYear: Int,
+    @ColumnInfo(name = "to_month") val toMonth: Int,
+    @ColumnInfo(name = "amount_cents") val amountCents: Long,
+    @ColumnInfo(name = "created_at") val createdAt: Long = System.currentTimeMillis()
+)
+
 /** 周期账单规则：到点自动生成一笔真实账单 */
 @Entity(tableName = "recurring")
 data class RecurringEntity(

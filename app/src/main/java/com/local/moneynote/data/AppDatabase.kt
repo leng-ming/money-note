@@ -14,9 +14,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         CategoryEntity::class,
         TransactionEntity::class,
         BudgetEntity::class,
-        RecurringEntity::class
+        RecurringEntity::class,
+        BudgetCarryoverEntity::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -27,6 +28,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun transactionDao(): TransactionDao
     abstract fun budgetDao(): BudgetDao
     abstract fun recurringDao(): RecurringDao
+    abstract fun budgetCarryoverDao(): BudgetCarryoverDao
 
     companion object {
         @Volatile
@@ -40,7 +42,7 @@ abstract class AppDatabase : RoomDatabase() {
                     "money_note.db"
                 )
                     .addCallback(SeedCallback)
-                    .addMigrations(MIGRATION_1_2)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                     .build()
                     .also { INSTANCE = it }
             }
@@ -55,6 +57,28 @@ abstract class AppDatabase : RoomDatabase() {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE categories ADD COLUMN parent_id INTEGER")
                 seedSubCategories(db)
+            }
+        }
+
+        /**
+         * v2 → v3：新增「预算转结」表。纯建表，不动任何已有数据。
+         *
+         * 列定义必须和 [BudgetCarryoverEntity] 完全一致，否则 Room 校验 schema 时会抛
+         * IllegalStateException: Migration didn't properly handle ...
+         */
+        private val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `budget_carryovers` (" +
+                        "`id` INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT, " +
+                        "`category_id` INTEGER, " +
+                        "`from_year` INTEGER NOT NULL, " +
+                        "`from_month` INTEGER NOT NULL, " +
+                        "`to_year` INTEGER NOT NULL, " +
+                        "`to_month` INTEGER NOT NULL, " +
+                        "`amount_cents` INTEGER NOT NULL, " +
+                        "`created_at` INTEGER NOT NULL)"
+                )
             }
         }
 

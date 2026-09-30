@@ -296,3 +296,34 @@ interface RecurringDao {
     @Delete
     suspend fun delete(e: RecurringEntity)
 }
+
+@Dao
+interface BudgetCarryoverDao {
+    @Query("SELECT * FROM budget_carryovers ORDER BY to_year DESC, to_month DESC, id DESC")
+    fun observeAll(): Flow<List<BudgetCarryoverEntity>>
+
+    /** 某月（某分类）从别处转进来的总额 */
+    @Query(
+        "SELECT COALESCE(SUM(amount_cents), 0) FROM budget_carryovers " +
+            "WHERE to_year = :year AND to_month = :month " +
+            "AND ((:categoryId IS NULL AND category_id IS NULL) OR category_id = :categoryId)"
+    )
+    fun observeIncoming(categoryId: Long?, year: Int, month: Int): Flow<Long>
+
+    /** 某月是否已经往外转过 —— 防止把同一笔剩余重复转两次 */
+    @Query(
+        "SELECT COUNT(*) > 0 FROM budget_carryovers " +
+            "WHERE from_year = :year AND from_month = :month " +
+            "AND ((:categoryId IS NULL AND category_id IS NULL) OR category_id = :categoryId)"
+    )
+    fun observeOutgoingExists(categoryId: Long?, year: Int, month: Int): Flow<Boolean>
+
+    @Query("SELECT * FROM budget_carryovers")
+    suspend fun allOnce(): List<BudgetCarryoverEntity>
+
+    @Insert
+    suspend fun insert(e: BudgetCarryoverEntity): Long
+
+    @Delete
+    suspend fun delete(e: BudgetCarryoverEntity)
+}

@@ -83,6 +83,8 @@ fun BudgetScreen(
     val expenseCats by vm.monthExpenseByCategory.collectAsState()
     val expense by vm.monthExpense.collectAsState()
     val categories by vm.allCategories.collectAsState()
+    val carryoverIn by vm.carryoverIn.collectAsState()
+    val carryoverDone by vm.carryoverDone.collectAsState()
     val scope = rememberCoroutineScope()
 
     val totalBudget = budgets.firstOrNull { it.categoryId == null }
@@ -116,10 +118,24 @@ fun BudgetScreen(
             TotalBudgetCard(
                 budget = totalBudget,
                 spent = expense,
+                carryoverIn = carryoverIn,
+                carryoverDone = carryoverDone,
+                year = year,
+                month = month,
                 onEdit = {
                     editingCategoryId = null
                     editingExisting = totalBudget != null
                     showEditor = true
+                },
+                onCarryOver = {
+                    val b = totalBudget
+                    if (b != null) {
+                        val remaining = b.amountCents + carryoverIn - expense
+                        scope.launch { vm.repo.carryOverBudget(null, year, month, remaining) }
+                    }
+                },
+                onUndoCarryOver = {
+                    scope.launch { vm.repo.undoCarryOver(null, year, month) }
                 }
             )
         }
@@ -202,7 +218,17 @@ fun BudgetScreen(
 /* ------------------------------------------------------------------ */
 
 @Composable
-private fun TotalBudgetCard(budget: BudgetEntity?, spent: Long, onEdit: () -> Unit) {
+private fun TotalBudgetCard(
+    budget: BudgetEntity?,
+    spent: Long,
+    carryoverIn: Long,
+    carryoverDone: Boolean,
+    year: Int,
+    month: Int,
+    onEdit: () -> Unit,
+    onCarryOver: () -> Unit,
+    onUndoCarryOver: () -> Unit
+) {
     SectionCard(title = "月度总预算") {
         if (budget == null) {
             Row(
@@ -221,17 +247,31 @@ private fun TotalBudgetCard(budget: BudgetEntity?, spent: Long, onEdit: () -> Un
                 Text("设置", color = BrandGreen, fontWeight = FontWeight.SemiBold)
             }
         } else {
-            val ratio = if (budget.amountCents > 0) spent.toFloat() / budget.amountCents else 0f
-            val remaining = budget.amountCents - spent
+            // 可用额度 = 基础预算 + 从以前月份转结过来的
+            val available = budget.amountCents + carryoverIn
+            val ratio = if (available > 0) spent.toFloat() / available else 0f
+            val remaining = available - spent
+            val (nextYear, nextMonth) = Dates.shiftMonth(year, month, 1)
+
             Row(verticalAlignment = Alignment.Bottom) {
                 Text(
-                    "¥ " + Money.format(budget.amountCents),
+                    "¥ " + Money.format(available),
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.Bold
                 )
                 Spacer(Modifier.weight(1f))
                 TextButton(onClick = onEdit) { Text("修改") }
             }
+
+            if (carryoverIn > 0L) {
+                Text(
+                    "基础 ¥" + Money.format(budget.amountCents) +
+                        "  ＋ 转结 ¥" + Money.format(carryoverIn),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = BrandGreen
+                )
+            }
+
             Spacer(Modifier.height(10.dp))
             BudgetBar(ratio = ratio)
             Spacer(Modifier.height(8.dp))
@@ -249,6 +289,60 @@ private fun TotalBudgetCard(budget: BudgetEntity?, spent: Long, onEdit: () -> Un
                     fontWeight = FontWeight.SemiBold,
                     color = if (remaining >= 0) TextSecondary else ExpenseRed
                 )
+            }
+
+            // ---------- 转结 ----------
+            Spacer(Modifier.height(12.dp))
+            when {
+                carryoverDone -> {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "本月剩余已转结到 ${nextYear}年${nextMonth}月",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = BrandGreen,
+                            modifier = Modifier.weight(1f)
+                        )
+                        TextButton(onClick = onUndoCarryOver) {
+                            Text("撤销", color = TextSecondary)
+                        }
+                    }
+                }
+
+                remaining <= 0L -> {
+                    Text(
+                        "本月没有可转结的剩余",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = TextSecondary
+                    )
+                }
+
+                else -> {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(BrandGreen.copy(alpha = 0.10f))
+                            .clickable(onClick = onCarryOver)
+                            .padding(horizontal = 12.dp, vertical = 11.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "把剩余 ¥" + Money.format(remaining) + " 转到 ${nextMonth} 月",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = BrandGreen,
+                            fontWeight = FontWeight.Medium,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Text(
+                            "转结 →",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = BrandGreen
+                        )
+                    }
+                }
             }
         }
     }

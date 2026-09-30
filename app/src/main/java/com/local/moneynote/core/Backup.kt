@@ -3,6 +3,7 @@ package com.local.moneynote.core
 import com.local.moneynote.data.AccountEntity
 import com.local.moneynote.data.AccountType
 import com.local.moneynote.data.BackupPayload
+import com.local.moneynote.data.BudgetCarryoverEntity
 import com.local.moneynote.data.BudgetEntity
 import com.local.moneynote.data.BudgetPeriod
 import com.local.moneynote.data.CategoryEntity
@@ -35,6 +36,10 @@ object Backup {
         root.put("transactions", JSONArray().also { arr -> payload.transactions.forEach { arr.put(txToJson(it)) } })
         root.put("budgets", JSONArray().also { arr -> payload.budgets.forEach { arr.put(budgetToJson(it)) } })
         root.put("recurring", JSONArray().also { arr -> payload.recurring.forEach { arr.put(recurringToJson(it)) } })
+        root.put(
+            "budgetCarryovers",
+            JSONArray().also { arr -> payload.budgetCarryovers.forEach { arr.put(carryoverToJson(it)) } }
+        )
         return root.toString(2)
     }
 
@@ -95,6 +100,17 @@ object Backup {
         put("nextOccurAt", r.nextOccurAt)
         put("lastGeneratedAt", r.lastGeneratedAt ?: JSONObject.NULL)
         put("enabled", r.enabled)
+    }
+
+    private fun carryoverToJson(c: BudgetCarryoverEntity) = JSONObject().apply {
+        put("id", c.id)
+        put("categoryId", c.categoryId ?: JSONObject.NULL)
+        put("fromYear", c.fromYear)
+        put("fromMonth", c.fromMonth)
+        put("toYear", c.toYear)
+        put("toMonth", c.toMonth)
+        put("amountCents", c.amountCents)
+        put("createdAt", c.createdAt)
     }
 
     /* ---------------- 导入 ---------------- */
@@ -165,6 +181,19 @@ object Backup {
                     nextOccurAt = o.optLong("nextOccurAt", System.currentTimeMillis()),
                     lastGeneratedAt = if (o.isNull("lastGeneratedAt")) null else o.getLong("lastGeneratedAt"),
                     enabled = o.optBoolean("enabled", true)
+                )
+            },
+            // 老备份文件里没有这一段，optJSONArray 返回 null → 解析成空列表，不会报错
+            budgetCarryovers = root.optJSONArray("budgetCarryovers").mapObjects { o ->
+                BudgetCarryoverEntity(
+                    id = o.getLong("id"),
+                    categoryId = if (o.isNull("categoryId")) null else o.getLong("categoryId"),
+                    fromYear = o.getInt("fromYear"),
+                    fromMonth = o.getInt("fromMonth"),
+                    toYear = o.getInt("toYear"),
+                    toMonth = o.getInt("toMonth"),
+                    amountCents = o.getLong("amountCents"),
+                    createdAt = o.optLong("createdAt", System.currentTimeMillis())
                 )
             }
         )

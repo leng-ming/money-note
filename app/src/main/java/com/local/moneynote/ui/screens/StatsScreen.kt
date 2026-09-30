@@ -61,6 +61,8 @@ fun StatsScreen(vm: AppViewModel) {
     val year by vm.year.collectAsState()
     val month by vm.month.collectAsState()
     val granularity by vm.granularity.collectAsState()
+    val periodLabel by vm.periodLabel.collectAsState()
+    val isCurrentPeriod by vm.isCurrentPeriod.collectAsState()
     val expense by vm.periodExpense.collectAsState()
     val income by vm.periodIncome.collectAsState()
     val expenseCats by vm.expenseByCategory.collectAsState()
@@ -105,8 +107,8 @@ fun StatsScreen(vm: AppViewModel) {
         item {
             PeriodBar(
                 granularity = granularity,
-                label = vm.periodLabel(),
-                isCurrent = vm.isCurrentPeriod(),
+                label = periodLabel,
+                isCurrent = isCurrentPeriod,
                 onGranularityChange = { vm.setGranularity(it) },
                 onPrev = { vm.shiftPeriod(-1) },
                 onNext = { vm.shiftPeriod(1) },

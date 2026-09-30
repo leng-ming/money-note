@@ -131,6 +131,20 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         .flatMapLatest { r -> repo.observeSumByCategory(TxKind.EXPENSE, r.first, r.last + 1) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT), emptyList())
 
+    /* ---------------- 预算转结 ---------------- */
+
+    /** 本月从以前月份转进来的预算总额 */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val carryoverIn: StateFlow<Long> = _anchor
+        .flatMapLatest { a -> repo.observeCarryoverIncoming(null, a.year, a.monthValue) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT), 0L)
+
+    /** 本月是否已经把剩余转给下月了（按钮据此显示「已转结」） */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val carryoverDone: StateFlow<Boolean> = _anchor
+        .flatMapLatest { a -> repo.observeCarryoverOutgoingExists(null, a.year, a.monthValue) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT), false)
+
     @OptIn(ExperimentalCoroutinesApi::class)
     val expenseByCategory: StateFlow<List<CategorySum>> = periodRange
         .flatMapLatest { r -> repo.observeSumByCategory(TxKind.EXPENSE, r.first, r.last + 1) }
@@ -185,26 +199,32 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         _anchor.value = LocalDate.now()
     }
 
-    /** 当前区间是否就是"今天所在的区间" */
-    fun isCurrentPeriod(): Boolean {
-        val now = LocalDate.now()
-        val a = _anchor.value
-        return when (_granularity.value) {
-            Granularity.YEAR -> now.year == a.year
-            Granularity.MONTH -> now.year == a.year && now.monthValue == a.monthValue
-            Granularity.DAY -> now == a
-        }
-    }
+    /**
+     * 当前区间是否就是"今天所在的区间"。
+     *
+     * 这里必须是 StateFlow，不能是普通函数：普通函数读的是 `_anchor.value`，
+     * 界面无从感知它的变化。当连续两个月都没有账单时，账单列表和合计值都不变，
+     * Compose 就不会重组，标题会一直卡在上一个月份（实际状态早就切过去了）。
+     */
+    val isCurrentPeriod: StateFlow<Boolean> =
+        combine(_granularity, _anchor) { g, a ->
+            val now = LocalDate.now()
+            when (g) {
+                Granularity.YEAR -> now.year == a.year
+                Granularity.MONTH -> now.year == a.year && now.monthValue == a.monthValue
+                Granularity.DAY -> now == a
+            }
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT), true)
 
-    /** 区间标题：2026年 / 2026年9月 / 2026年9月26日 */
-    fun periodLabel(): String {
-        val a = _anchor.value
-        return when (_granularity.value) {
-            Granularity.YEAR -> "${a.year}年"
-            Granularity.MONTH -> Dates.labelMonth(a.year, a.monthValue)
-            Granularity.DAY -> Dates.labelDayFull(Dates.toMillis(a))
-        }
-    }
+    /** 区间标题：2026年 / 2026年9月 / 2026年9月26日（同样做成 State，保证标题能刷新） */
+    val periodLabel: StateFlow<String> =
+        combine(_granularity, _anchor) { g, a ->
+            when (g) {
+                Granularity.YEAR -> "${a.year}年"
+                Granularity.MONTH -> Dates.labelMonth(a.year, a.monthValue)
+                Granularity.DAY -> Dates.labelDayFull(Dates.toMillis(a))
+            }
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT), "")
 
     /** 预算页用（预算固定按月） */
     fun isCurrentMonth(): Boolean {

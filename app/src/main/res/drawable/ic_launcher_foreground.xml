@@ -1,33 +1,69 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  小鲸鱼记账的图标：一只正在喷水的卡通小鲸鱼。
+
+  为什么用 vector 手绘而不是位图：
+  - 矢量在任意分辨率、任意 DPI 下都清晰，不会被拉伸糊掉
+  - 体积只有几 KB，比一整套多分辨率 PNG 小得多
+  - 想改颜色形状随时改，不用重新出图
+
+  坐标按 108x108 设计，所有内容都控制在中间的安全区（约 18~90）内，
+  这样被圆形 / 圆角方形 / 水滴形等各种启动器遮罩裁切时都不会缺胳膊少腿。
+  前景只画白色和深绿，绿色圆形背景由 ic_launcher_background 提供。
+-->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- 账本封面 -->
+
+    <!-- 喷出的水花 -->
     <path
         android:fillColor="#FFFFFFFF"
-        android:pathData="M36,32 h36 a5,5 0 0 1 5,5 v34 a5,5 0 0 1 -5,5 h-36 a5,5 0 0 1 -5,-5 v-34 a5,5 0 0 1 5,-5 z" />
-    <!-- 人民币符号 ¥ -->
+        android:pathData="M55,20 m-2.8,0 a2.8,2.8 0 1,0 5.6,0 a2.8,2.8 0 1,0 -5.6,0 Z" />
     <path
-        android:pathData="M47,43 L54,53 L61,43"
-        android:strokeColor="#FF2E7D32"
-        android:strokeWidth="4"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round" />
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M48,25 m-2.2,0 a2.2,2.2 0 1,0 4.4,0 a2.2,2.2 0 1,0 -4.4,0 Z" />
     <path
-        android:pathData="M54,53 L54,69"
-        android:strokeColor="#FF2E7D32"
-        android:strokeWidth="4"
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M62,25 m-2.2,0 a2.2,2.2 0 1,0 4.4,0 a2.2,2.2 0 1,0 -4.4,0 Z" />
+
+    <!-- 尾鳍 -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M43,52 C37,46 29,42 25,44 C22,46 25,52 30,57 C25,62 22,68 25,70 C29,72 37,68 43,62 Z" />
+
+    <!-- 身体 -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M58,36 C70,36 79,46 79,58 C79,70 70,80 58,80 C46,80 37,70 37,58 C37,46 46,36 58,36 Z" />
+
+    <!-- 胸鳍 -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M54,70 C50,77 44,82 40,83 C37,84 35,81 37,76 C40,71 47,66 53,64 Z" />
+
+    <!-- 水柱 -->
+    <path
+        android:pathData="M55,39 L55,30"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="4.5"
         android:strokeLineCap="round" />
+
+    <!-- 眼睛：用品牌深绿，和背景的绿形成层次 -->
     <path
-        android:pathData="M46,59 L62,59"
-        android:strokeColor="#FF2E7D32"
-        android:strokeWidth="4"
-        android:strokeLineCap="round" />
+        android:fillColor="#FF1B5E20"
+        android:pathData="M68,51 m-3.6,0 a3.6,3.6 0 1,0 7.2,0 a3.6,3.6 0 1,0 -7.2,0 Z" />
+
+    <!-- 眼里一点高光，让眼神活起来 -->
     <path
-        android:pathData="M46,65 L62,65"
-        android:strokeColor="#FF2E7D32"
-        android:strokeWidth="4"
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M69.4,49.4 m-1.2,0 a1.2,1.2 0 1,0 2.4,0 a1.2,1.2 0 1,0 -2.4,0 Z" />
+
+    <!-- 微笑 -->
+    <path
+        android:pathData="M71,65 C68,68.5 63,69.5 59,68"
+        android:strokeColor="#FF1B5E20"
+        android:strokeWidth="2.6"
         android:strokeLineCap="round" />
 </vector>
