@@ -127,6 +127,24 @@ object Dates {
     fun daysInMonth(year: Int, month: Int): Int =
         LocalDate.of(year, month, 1).lengthOfMonth()
 
+    /**
+     * 某个月还剩多少天（含今天）。
+     *
+     * - 正在过的这个月：从今天算到月底，例如 9月28日 → 3 天（28、29、30）
+     * - 已经过去的月份：0 天
+     * - 还没到的月份：整月天数
+     */
+    fun remainingDaysInMonth(year: Int, month: Int): Int {
+        val today = LocalDate.now()
+        val firstDay = LocalDate.of(year, month, 1)
+        val lastDay = firstDay.lengthOfMonth()
+        return when {
+            today.year == year && today.monthValue == month -> lastDay - today.dayOfMonth + 1
+            today.isBefore(firstDay) -> lastDay
+            else -> 0
+        }
+    }
+
     /** 按周期频率推进下一次发生时间 */
     fun nextOccurrence(fromMillis: Long, freq: RecurFreq, interval: Int): Long {
         val step = interval.coerceAtLeast(1).toLong()

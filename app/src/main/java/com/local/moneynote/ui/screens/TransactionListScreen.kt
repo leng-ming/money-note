@@ -14,6 +14,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Search
@@ -43,6 +45,15 @@ import com.local.moneynote.core.Dates
 import com.local.moneynote.core.Money
 import com.local.moneynote.data.TransactionRow
 import com.local.moneynote.data.TxKind
+import com.local.moneynote.ui.components.HOME_CARD_HEIGHT
+import com.local.moneynote.ui.components.HOME_PAGE_ASSETS
+import com.local.moneynote.ui.components.HOME_PAGE_BUDGET
+import com.local.moneynote.ui.components.HOME_PAGE_COUNT
+import com.local.moneynote.ui.components.HOME_PAGE_SUMMARY
+import com.local.moneynote.ui.components.HomeAssetsCard
+import com.local.moneynote.ui.components.HomeBudgetCard
+import com.local.moneynote.ui.components.HomeCardIndicator
+import com.local.moneynote.ui.components.HomeSummaryCard
 import com.local.moneynote.ui.components.PeriodBar
 import com.local.moneynote.ui.components.TransactionRowCard
 import com.local.moneynote.ui.theme.BrandGreen
@@ -63,8 +74,27 @@ fun TransactionListScreen(
     val expense by vm.periodExpense.collectAsState()
     val income by vm.periodIncome.collectAsState()
 
+    // 主页卡片还要用到预算与资产数据
+    val year by vm.year.collectAsState()
+    val month by vm.month.collectAsState()
+    val budgets by vm.budgets.collectAsState()
+    val carryoverIn by vm.carryoverIn.collectAsState()
+    val accounts by vm.accounts.collectAsState()
+    val netByAccount by vm.netByAccount.collectAsState()
+
     var deleteTarget by remember { mutableStateOf<TransactionRow?>(null) }
     val scope = rememberCoroutineScope()
+
+    // 三张卡片：[资产] [收支] [预算]，默认停在中间的收支
+    val pagerState = rememberPagerState(initialPage = HOME_PAGE_SUMMARY) { HOME_PAGE_COUNT }
+    val totalBudget = budgets.firstOrNull { it.categoryId == null }
+    val remainingDays = Dates.remainingDaysInMonth(year, month)
+    // 剩余日均 = (预算 + 上月转结 - 已用) ÷ 剩余天数
+    val dailyBudget = totalBudget?.let { b ->
+        val left = b.amountCents + carryoverIn - expense
+        if (remainingDays > 0 && left > 0) left / remainingDays else null
+    }
+    val totalAssets = accounts.sumOf { it.initialBalanceCents + (netByAccount[it.id] ?: 0L) }
 
     Column(modifier = Modifier.fillMaxSize()) {
         PeriodBar(
@@ -82,14 +112,44 @@ fun TransactionListScreen(
             }
         )
 
-        PeriodSummaryCard(
-            expense = expense,
-            income = income,
-            title = when (granularity) {
-                Granularity.YEAR -> "本年支出"
-                Granularity.MONTH -> "本月支出"
-                Granularity.DAY -> "本日支出"
+        // 左右滑动切换：往左滑看预算，往右滑看总资产
+        HorizontalPager(
+            state = pagerState,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(HOME_CARD_HEIGHT),
+            beyondViewportPageCount = 1
+        ) { page ->
+            when (page) {
+                HOME_PAGE_ASSETS -> HomeAssetsCard(
+                    totalCents = totalAssets,
+                    accounts = accounts.map { acc ->
+                        acc.name to (acc.initialBalanceCents + (netByAccount[acc.id] ?: 0L))
+                    }
+                )
+
+                HOME_PAGE_BUDGET -> HomeBudgetCard(
+                    budgetCents = totalBudget?.amountCents ?: 0L,
+                    spentCents = expense,
+                    carryoverIn = carryoverIn,
+                    remainingDays = remainingDays
+                )
+
+                else -> HomeSummaryCard(
+                    title = when (granularity) {
+                        Granularity.YEAR -> "本年支出"
+                        Granularity.MONTH -> "本月支出"
+                        Granularity.DAY -> "本日支出"
+                    },
+                    expense = expense,
+                    income = income,
+                    dailyBudget = dailyBudget
+                )
             }
+        }
+        HomeCardIndicator(
+            currentPage = pagerState.currentPage,
+            modifier = Modifier.padding(top = 5.dp, bottom = 2.dp)
         )
 
         val groups = remember(rows, granularity) { groupTransactions(rows, granularity) }
