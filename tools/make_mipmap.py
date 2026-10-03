@@ -66,12 +66,16 @@ def rounded(img, radius_ratio=0.22, bg=(255, 255, 255)):
     return (img.astype(np.float32) * a + canvas.astype(np.float32) * (1 - a)).astype(np.uint8)
 
 
-def source_files():
-    return sorted(glob.glob(os.path.join(SRC_DIR, "whale_icon_*.png")))
+def source_files(pattern="whale_*.png"):
+    return sorted(glob.glob(os.path.join(SRC_DIR, pattern)))
 
 
 def cmd_compare():
-    files = source_files()
+    pattern = sys.argv[2] if len(sys.argv) > 2 else "whale_v2_*.png"
+    files = source_files(pattern)
+    if not files:
+        print(f"没找到匹配 {pattern} 的图")
+        return
     tiles = []
     for path in files:
         square = load_square(path)
@@ -84,7 +88,8 @@ def cmd_compare():
     for i, (name, tile) in enumerate(tiles):
         x = pad + i * cell
         canvas[pad:pad + 120, x:x + 120] = tile
-        tag = re.search(r"whale_icon_(\d+)", name).group(1)
+        tag = re.search(r"(\d+)_\d+_?\.png$", name)
+        tag = tag.group(1) if tag else name
         cv2.putText(canvas, tag, (x + 30, cell + 22),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (60, 60, 60), 2, cv2.LINE_AA)
 
