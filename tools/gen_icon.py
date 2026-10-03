@@ -16,14 +16,17 @@ COMFY = "http://127.0.0.1:8188"
 
 POS = (
     "cute cartoon whale mascot for a mobile app icon, "
-    "flat vector illustration, chubby white whale, big friendly eyes with highlight, "
-    "happy smile, small water spout on top, tiny pectoral fin, "
-    "solid dark green background, centered composition, generous margin around subject, "
-    "minimal, clean, kawaii, sticker art, sharp edges, high quality"
+    "swimming pose, side view, body horizontal and streamlined, "
+    "pectoral fins tucked back along the body, no legs, no feet, "
+    "chubby rounded white whale, big friendly eye with highlight, happy smile, "
+    "small water spout on top of the head, "
+    "solid flat green background, centered composition, generous margin around subject, "
+    "minimal, clean, kawaii, flat vector illustration, sharp edges, high quality"
 )
 
 NEG = (
-    "realistic, photo, photographic, 3d render, complex background, scenery, "
+    "standing, walking, legs, feet, arms, human limbs, upright posture, "
+    "realistic, photo, photographic, 3d render, complex background, scenery, water surface, "
     "text, letters, watermark, signature, logo, blurry, low quality, jpeg artifacts, "
     "multiple whales, human, hands, frame, border, gradient background, dark shadows"
 )

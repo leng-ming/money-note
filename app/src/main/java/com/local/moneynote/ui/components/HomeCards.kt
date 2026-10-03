@@ -5,13 +5,17 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
@@ -23,11 +27,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.local.moneynote.core.Money
 import com.local.moneynote.ui.theme.BrandGreen
 import com.local.moneynote.ui.theme.BrandGreenLight
+import com.local.moneynote.ui.theme.ExpenseRed
+import com.local.moneynote.ui.theme.TextSecondary
 
 /**
  * 主页顶部三张可左右滑的卡片。
@@ -219,7 +226,7 @@ fun HomeBudgetCard(
 @Composable
 fun HomeAssetsCard(
     totalCents: Long,
-    accounts: List<Pair<String, Long>>,
+    accountCount: Int,
     modifier: Modifier = Modifier
 ) {
     CardShell(modifier) {
@@ -227,38 +234,12 @@ fun HomeAssetsCard(
         Spacer(Modifier.height(2.dp))
         CardAmount("¥ " + Money.format(totalCents))
         Spacer(Modifier.height(10.dp))
-
-        if (accounts.isEmpty()) {
-            Text(
-                "还没有账户",
-                color = Color.White.copy(alpha = 0.8f),
-                style = MaterialTheme.typography.labelMedium
-            )
-        } else {
-            // 每行两个，超过 6 个就省略，避免撑破卡片
-            accounts.take(6).chunked(2).forEach { pair ->
-                Row(modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp)) {
-                    pair.forEach { (name, balance) ->
-                        Text(
-                            "$name ¥${Money.format(balance)}",
-                            color = Color.White.copy(alpha = 0.88f),
-                            style = MaterialTheme.typography.labelMedium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-                    if (pair.size == 1) Spacer(Modifier.weight(1f))
-                }
-            }
-            if (accounts.size > 6) {
-                Text(
-                    "还有 ${accounts.size - 6} 个账户…",
-                    color = Color.White.copy(alpha = 0.6f),
-                    style = MaterialTheme.typography.labelSmall
-                )
-            }
-        }
+        Text(
+            if (accountCount > 0) "共 $accountCount 个账户 · 明细在下方"
+            else "还没有账户",
+            color = Color.White.copy(alpha = 0.82f),
+            style = MaterialTheme.typography.labelLarge
+        )
     }
 }
 
@@ -287,6 +268,76 @@ fun HomeCardIndicator(
                         if (active) BrandGreen else BrandGreen.copy(alpha = 0.22f)
                     )
             )
+        }
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/*  资产页下方：账户余额列表                                            */
+/* ------------------------------------------------------------------ */
+
+/**
+ * 滑到「全部账户合计」那一页时，下方列表改显示这个。
+ *
+ * 为什么不塞进绿卡里：账户数量不可控，挤在小卡片里字又小又难看；
+ * 余额本身信息量也不小，摊开来一行一个更好读。
+ */
+@Composable
+fun AccountBalanceList(
+    accounts: List<Pair<String, Long>>,
+    modifier: Modifier = Modifier
+) {
+    if (accounts.isEmpty()) {
+        Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text(
+                "还没有账户\n去「我的 → 账户管理」添加一个",
+                color = TextSecondary,
+                style = MaterialTheme.typography.bodyMedium,
+                textAlign = TextAlign.Center
+            )
+        }
+        return
+    }
+
+    LazyColumn(
+        modifier = modifier.fillMaxSize(),
+        contentPadding = PaddingValues(
+            start = 12.dp,
+            end = 12.dp,
+            top = 12.dp,
+            bottom = 100.dp
+        ),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        item {
+            Text(
+                "账户余额",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(start = 4.dp, bottom = 2.dp)
+            )
+        }
+        items(accounts) { (name, balance) ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color.White)
+                    .padding(horizontal = 16.dp, vertical = 15.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    name,
+                    style = MaterialTheme.typography.bodyLarge,
+                    modifier = Modifier.weight(1f)
+                )
+                Text(
+                    "¥ " + Money.format(balance),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (balance < 0) ExpenseRed else Color.Unspecified
+                )
+            }
         }
     }
 }

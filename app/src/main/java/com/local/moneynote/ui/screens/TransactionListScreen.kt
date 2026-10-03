@@ -45,6 +45,7 @@ import com.local.moneynote.core.Dates
 import com.local.moneynote.core.Money
 import com.local.moneynote.data.TransactionRow
 import com.local.moneynote.data.TxKind
+import com.local.moneynote.ui.components.AccountBalanceList
 import com.local.moneynote.ui.components.HOME_CARD_HEIGHT
 import com.local.moneynote.ui.components.HOME_PAGE_ASSETS
 import com.local.moneynote.ui.components.HOME_PAGE_BUDGET
@@ -123,9 +124,7 @@ fun TransactionListScreen(
             when (page) {
                 HOME_PAGE_ASSETS -> HomeAssetsCard(
                     totalCents = totalAssets,
-                    accounts = accounts.map { acc ->
-                        acc.name to (acc.initialBalanceCents + (netByAccount[acc.id] ?: 0L))
-                    }
+                    accountCount = accounts.size
                 )
 
                 HOME_PAGE_BUDGET -> HomeBudgetCard(
@@ -148,9 +147,20 @@ fun TransactionListScreen(
             }
         }
         HomeCardIndicator(
-            currentPage = pagerState.currentPage,
+            currentPage = pagerState.settledPage,
             modifier = Modifier.padding(top = 5.dp, bottom = 2.dp)
         )
+
+        // 滑到「总资产」那一页时，下面改显示账户余额；滑回收支/预算再换回账单明细。
+        // 这里用 settledPage 而不是 currentPage —— 后者滑到一半就会变，下方内容会中途跳一下。
+        if (pagerState.settledPage == HOME_PAGE_ASSETS) {
+            AccountBalanceList(
+                accounts = accounts.map { acc ->
+                    acc.name to (acc.initialBalanceCents + (netByAccount[acc.id] ?: 0L))
+                }
+            )
+            return@Column
+        }
 
         val groups = remember(rows, granularity) { groupTransactions(rows, granularity) }
 
