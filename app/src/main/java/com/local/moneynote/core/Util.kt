@@ -128,6 +128,19 @@ object Dates {
         LocalDate.of(year, month, 1).lengthOfMonth()
 
     /**
+     * 精确到秒的时间戳：2026-10-03 19:40:19
+     *
+     * 用在账单详情里 —— 记账时只挑日期，时分秒是点保存那一刻的真实时间，
+     * 想知道「这杯奶茶到底是几点买的」就得靠它。
+     */
+    fun labelDateTimeFull(millis: Long): String {
+        val dt = toLocalDateTime(millis)
+        return "%04d-%02d-%02d %02d:%02d:%02d".format(
+            dt.year, dt.monthValue, dt.dayOfMonth, dt.hour, dt.minute, dt.second
+        )
+    }
+
+    /**
      * 某个月还剩多少天（含今天）。
      *
      * - 正在过的这个月：从今天算到月底，例如 9月28日 → 3 天（28、29、30）

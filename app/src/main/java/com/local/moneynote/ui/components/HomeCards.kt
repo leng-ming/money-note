@@ -33,6 +33,7 @@ import androidx.compose.ui.unit.dp
 import com.local.moneynote.core.Money
 import com.local.moneynote.ui.theme.BrandGreen
 import com.local.moneynote.ui.theme.BrandGreenLight
+import com.local.moneynote.ui.theme.CardBg
 import com.local.moneynote.ui.theme.ExpenseRed
 import com.local.moneynote.ui.theme.TextSecondary
 
@@ -322,7 +323,7 @@ fun AccountBalanceList(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(12.dp))
-                    .background(Color.White)
+                    .background(CardBg)
                     .padding(horizontal = 16.dp, vertical = 15.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {

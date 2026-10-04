@@ -129,7 +129,10 @@ private fun GranularityChip(label: String, selected: Boolean, onClick: () -> Uni
     Box(
         modifier = Modifier
             .clip(RoundedCornerShape(14.dp))
-            .background(if (selected) BrandGreen.copy(alpha = 0.15f) else Color(0xFFEDEFF2))
+            .background(
+                if (selected) BrandGreen.copy(alpha = 0.15f)
+                else MaterialTheme.colorScheme.surfaceVariant
+            )
             .clickable(onClick = onClick)
             .padding(horizontal = 22.dp, vertical = 5.dp)
     ) {
@@ -203,7 +206,10 @@ fun SelectChipBtn(
     Box(
         modifier = modifier
             .clip(RoundedCornerShape(16.dp))
-            .background(if (selected) accent.copy(alpha = 0.16f) else Color(0xFFEDEFF2))
+            .background(
+                if (selected) accent.copy(alpha = 0.16f)
+                else MaterialTheme.colorScheme.surfaceVariant
+            )
             .clickable(onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 7.dp)
     ) {

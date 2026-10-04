@@ -357,6 +357,17 @@ fun AddTransactionScreen(
             )
         }
 
+        // 编辑已有账单时，把它精确到秒的记录时间摆出来。
+        // 列表里按天分组，看不到具体几点，点进来才看得到。
+        if (isEditing) {
+            Text(
+                "记录时间：" + Dates.labelDateTimeFull(occurredAt),
+                style = MaterialTheme.typography.labelSmall,
+                color = TextSecondary,
+                modifier = Modifier.padding(start = 18.dp, top = 2.dp)
+            )
+        }
+
         // ---------- 数字键盘 ----------
         Keypad(
             onKey = { key -> amountText = applyKey(amountText, key) },
@@ -810,7 +821,9 @@ private fun FuncButton(
         modifier = modifier
             .padding(3.dp)
             .clip(RoundedCornerShape(10.dp))
-            .background(if (highlight) BrandGreen else Color(0xFFE3E6EA))
+            .background(
+                if (highlight) BrandGreen else MaterialTheme.colorScheme.surfaceVariant
+            )
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
