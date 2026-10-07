@@ -253,6 +253,36 @@ interface TransactionDao {
             "GROUP BY month ORDER BY month ASC"
     )
     fun observeSumByMonth(kind: TxKind, start: Long, end: Long): Flow<List<MonthSum>>
+
+    /**
+     * 单个账户在某一年里各月的支出/收入汇总。
+     * 账户详情页用它回答「这张卡今年每个月花掉多少」。
+     */
+    @Query(
+        "SELECT strftime('%Y-%m', occurred_at / 1000, 'unixepoch', 'localtime') AS month, " +
+            "SUM(amount_cents) AS totalCents " +
+            "FROM transactions " +
+            "WHERE account_id = :accountId AND kind = :kind AND exclude_from_stats = 0 " +
+            "AND occurred_at >= :start AND occurred_at < :end " +
+            "GROUP BY month ORDER BY month ASC"
+    )
+    fun observeSumByMonthForAccount(
+        accountId: Long,
+        kind: TxKind,
+        start: Long,
+        end: Long
+    ): Flow<List<MonthSum>>
+
+    /** 单个账户有史以来的收支合计，账户详情页顶部用 */
+    @Query(
+        "SELECT COALESCE(SUM(amount_cents), 0) FROM transactions " +
+            "WHERE account_id = :accountId AND kind = :kind AND exclude_from_stats = 0"
+    )
+    fun observeTotalForAccount(accountId: Long, kind: TxKind): Flow<Long>
+
+    /** 某账户交易里最早的一笔时间，用来决定年份选择器的起始年 */
+    @Query("SELECT MIN(occurred_at) FROM transactions WHERE account_id = :accountId")
+    fun observeEarliestForAccount(accountId: Long): Flow<Long?>
 }
 
 @Dao

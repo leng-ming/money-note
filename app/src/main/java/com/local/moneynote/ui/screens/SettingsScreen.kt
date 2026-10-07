@@ -585,7 +585,7 @@ private fun CategoryGrid(list: List<CategoryEntity>, onClick: (CategoryEntity) -
 /* ------------------------------------------------------------------ */
 
 @Composable
-private fun AccountEditorDialog(
+fun AccountEditorDialog(
     initial: AccountEntity?,
     onDismiss: () -> Unit,
     onSave: (name: String, type: AccountType, initialCents: Long) -> Unit,

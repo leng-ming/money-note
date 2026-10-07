@@ -115,6 +115,22 @@ class MoneyRepository(private val db: AppDatabase) {
     fun observeSumByMonth(kind: TxKind, start: Long, end: Long): Flow<List<MonthSum>> =
         transactions.observeSumByMonth(kind, start, end)
 
+    /* ---------------- 账户详情 ---------------- */
+
+    fun observeSumByMonthForAccount(
+        accountId: Long,
+        kind: TxKind,
+        start: Long,
+        end: Long
+    ): Flow<List<MonthSum>> =
+        transactions.observeSumByMonthForAccount(accountId, kind, start, end)
+
+    fun observeTotalForAccount(accountId: Long, kind: TxKind): Flow<Long> =
+        transactions.observeTotalForAccount(accountId, kind)
+
+    fun observeEarliestForAccount(accountId: Long): Flow<Long?> =
+        transactions.observeEarliestForAccount(accountId)
+
     fun observeSpent(categoryId: Long?, start: Long, end: Long): Flow<Long> =
         transactions.observeSpent(categoryId, start, end)
 

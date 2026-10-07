@@ -1,6 +1,7 @@
 package com.local.moneynote.ui.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -278,6 +279,18 @@ fun HomeCardIndicator(
 /* ------------------------------------------------------------------ */
 
 /**
+ * 账户列表里的一行。
+ *
+ * 单拎一个类型出来，是因为要带上账户 id —— 点进去看详情时得知道点的是谁。
+ * 用 Triple 也能塞下，但 Long/String/Long 排在一起太容易传错顺序。
+ */
+data class AccountLine(
+    val id: Long,
+    val name: String,
+    val balanceCents: Long
+)
+
+/**
  * 滑到「全部账户合计」那一页时，下方列表改显示这个。
  *
  * 为什么不塞进绿卡里：账户数量不可控，挤在小卡片里字又小又难看；
@@ -285,7 +298,8 @@ fun HomeCardIndicator(
  */
 @Composable
 fun AccountBalanceList(
-    accounts: List<Pair<String, Long>>,
+    accounts: List<AccountLine>,
+    onAccountClick: (Long) -> Unit,
     modifier: Modifier = Modifier
 ) {
     if (accounts.isEmpty()) {
@@ -318,25 +332,26 @@ fun AccountBalanceList(
                 modifier = Modifier.padding(start = 4.dp, bottom = 2.dp)
             )
         }
-        items(accounts) { (name, balance) ->
+        items(accounts, key = { it.id }) { acc ->
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(12.dp))
                     .background(CardBg)
+                    .clickable { onAccountClick(acc.id) }
                     .padding(horizontal = 16.dp, vertical = 15.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    name,
+                    acc.name,
                     style = MaterialTheme.typography.bodyLarge,
                     modifier = Modifier.weight(1f)
                 )
                 Text(
-                    "¥ " + Money.format(balance),
+                    "¥ " + Money.format(acc.balanceCents),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
-                    color = if (balance < 0) ExpenseRed else Color.Unspecified
+                    color = if (acc.balanceCents < 0) ExpenseRed else Color.Unspecified
                 )
             }
         }

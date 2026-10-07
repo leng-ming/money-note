@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -26,6 +27,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -46,6 +48,7 @@ import com.local.moneynote.core.Money
 import com.local.moneynote.data.TransactionRow
 import com.local.moneynote.data.TxKind
 import com.local.moneynote.ui.components.AccountBalanceList
+import com.local.moneynote.ui.components.AccountLine
 import com.local.moneynote.ui.components.HOME_CARD_HEIGHT
 import com.local.moneynote.ui.components.HOME_PAGE_ASSETS
 import com.local.moneynote.ui.components.HOME_PAGE_BUDGET
@@ -66,7 +69,9 @@ import kotlinx.coroutines.launch
 fun TransactionListScreen(
     vm: AppViewModel,
     onEdit: (Long) -> Unit,
-    onSearch: () -> Unit
+    onSearch: () -> Unit,
+    onOpenAccount: (Long) -> Unit,
+    onAssetsPageChanged: (Boolean) -> Unit
 ) {
     val granularity by vm.granularity.collectAsState()
     val periodLabel by vm.periodLabel.collectAsState()
@@ -74,6 +79,16 @@ fun TransactionListScreen(
     val rows by vm.periodTransactions.collectAsState()
     val expense by vm.periodExpense.collectAsState()
     val income by vm.periodIncome.collectAsState()
+
+    val listState = rememberLazyListState()
+
+    // 修一个很隐蔽的问题：LazyColumn 带 key 时，新项插到顶部并不会自动进入视口 ——
+    // Compose 会尽量保持「原来那一项」停留在原地，于是最新一笔被顶到屏幕外面，
+    // 用户得手动往上滑才看得见。只要之前往下翻过就会触发，与记账时间无关。
+    // 这里盯着首项 id：新增账单必然改变它，变了就滚回顶部。
+    LaunchedEffect(rows.firstOrNull()?.id) {
+        if (rows.isNotEmpty()) listState.animateScrollToItem(0)
+    }
 
     // 主页卡片还要用到预算与资产数据
     val year by vm.year.collectAsState()
@@ -88,6 +103,11 @@ fun TransactionListScreen(
 
     // 三张卡片：[资产] [收支] [预算]，默认停在中间的收支
     val pagerState = rememberPagerState(initialPage = HOME_PAGE_SUMMARY) { HOME_PAGE_COUNT }
+
+    // 告诉外层「现在停在资产页」，外层据此把右下角的 FAB 换成「添加账户」
+    LaunchedEffect(pagerState.settledPage) {
+        onAssetsPageChanged(pagerState.settledPage == HOME_PAGE_ASSETS)
+    }
     val totalBudget = budgets.firstOrNull { it.categoryId == null }
     val remainingDays = Dates.remainingDaysInMonth(year, month)
     // 剩余日均 = (预算 + 上月转结 - 已用) ÷ 剩余天数
@@ -156,8 +176,13 @@ fun TransactionListScreen(
         if (pagerState.settledPage == HOME_PAGE_ASSETS) {
             AccountBalanceList(
                 accounts = accounts.map { acc ->
-                    acc.name to (acc.initialBalanceCents + (netByAccount[acc.id] ?: 0L))
-                }
+                    AccountLine(
+                        id = acc.id,
+                        name = acc.name,
+                        balanceCents = acc.initialBalanceCents + (netByAccount[acc.id] ?: 0L)
+                    )
+                },
+                onAccountClick = onOpenAccount
             )
             return@Column
         }
@@ -182,6 +207,7 @@ fun TransactionListScreen(
             }
         } else {
             LazyColumn(
+                state = listState,
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 100.dp)
             ) {
