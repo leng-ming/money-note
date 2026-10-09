@@ -1,6 +1,8 @@
 package com.local.moneynote.ui.screens
 
+import android.content.Intent
 import android.net.Uri
+import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -32,6 +34,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.GridOn
+import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.TableChart
 import androidx.compose.material3.AlertDialog
@@ -43,6 +46,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -57,6 +61,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.local.moneynote.AppViewModel
 import com.local.moneynote.core.Backup
 import com.local.moneynote.core.Money
@@ -64,6 +71,7 @@ import com.local.moneynote.data.AccountEntity
 import com.local.moneynote.data.AccountType
 import com.local.moneynote.data.CategoryEntity
 import com.local.moneynote.data.TxKind
+import com.local.moneynote.notify.PaymentNotificationListener
 import com.local.moneynote.ui.AccountStyles
 import com.local.moneynote.ui.CatIcons
 import com.local.moneynote.ui.components.SectionCard
@@ -103,6 +111,22 @@ fun SettingsScreen(
     var showCategoryEditor by remember { mutableStateOf(false) }
     var pendingImportUri by remember { mutableStateOf<Uri?>(null) }
     var showImportConfirm by remember { mutableStateOf(false) }
+
+    // 自动记账是否已授权。授权是在系统设置里做的，用户点完返回时状态会变，
+    // 所以监听 ON_RESUME 重新查一次，否则界面会一直显示「未开启」。
+    var notifyGranted by remember {
+        mutableStateOf(PaymentNotificationListener.isGranted(context))
+    }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                notifyGranted = PaymentNotificationListener.isGranted(context)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     fun toast(msg: String) {
         Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
@@ -243,6 +267,34 @@ fun SettingsScreen(
         }
 
         // ---------- 数据 ----------
+        // ---------- 自动记账 ----------
+        item {
+            SectionCard(title = "自动记账") {
+                ManageRow(
+                    icon = Icons.Filled.NotificationsActive,
+                    iconColor = if (notifyGranted) BrandGreen else TextSecondary,
+                    title = if (notifyGranted) "已开启" else "去开启自动记账",
+                    subtitle = if (notifyGranted) {
+                        "微信 / 支付宝付款后会提醒你，点一下就能记好"
+                    } else {
+                        "需要授权「通知使用权」，只读取微信和支付宝的支付通知"
+                    },
+                    onClick = {
+                        context.startActivity(
+                            Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
+                        )
+                    }
+                )
+                Text(
+                    "只解析通知里的金额，不做任何上传。App 依旧没有网络权限，" +
+                        "数据不会离开这台手机。",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TextSecondary,
+                    modifier = Modifier.padding(top = 8.dp, start = 4.dp)
+                )
+            }
+        }
+
         item {
             SectionCard(title = "数据与备份") {
                 ManageRow(

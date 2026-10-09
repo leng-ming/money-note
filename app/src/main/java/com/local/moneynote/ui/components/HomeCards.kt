@@ -80,6 +80,22 @@ private fun CardLabel(text: String) {
     )
 }
 
+/** 卡片右上角的「编辑」。绿卡上的文字，配色要跟着走白系 */
+@Composable
+private fun CardEditAction(onClick: () -> Unit) {
+    Text(
+        "编辑",
+        color = Color.White.copy(alpha = 0.92f),
+        style = MaterialTheme.typography.labelMedium,
+        fontWeight = FontWeight.Medium,
+        modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(Color.White.copy(alpha = 0.18f))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 9.dp, vertical = 3.dp)
+    )
+}
+
 @Composable
 private fun CardAmount(text: String) {
     Text(
@@ -166,16 +182,21 @@ fun HomeBudgetCard(
     spentCents: Long,
     carryoverIn: Long,
     remainingDays: Int,
+    onEdit: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     if (budgetCents <= 0L) {
         CardShell(modifier) {
-            CardLabel("本月预算")
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                CardLabel("本月预算")
+                Spacer(Modifier.weight(1f))
+                CardEditAction(onEdit)
+            }
             Spacer(Modifier.height(2.dp))
             CardAmount("未设置")
             Spacer(Modifier.height(10.dp))
             Text(
-                "去「预算」页设一个额度，这里就会显示剩余预算和每天还能花多少",
+                "点右上角「编辑」设一个额度，这里就会显示剩余预算和每天还能花多少",
                 color = Color.White.copy(alpha = 0.8f),
                 style = MaterialTheme.typography.labelMedium
             )
@@ -191,7 +212,11 @@ fun HomeBudgetCard(
     val over = remaining < 0
 
     CardShell(modifier) {
-        CardLabel(if (over) "本月已超支" else "本月预算剩余")
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            CardLabel(if (over) "本月已超支" else "本月预算剩余")
+            Spacer(Modifier.weight(1f))
+            CardEditAction(onEdit)
+        }
         Spacer(Modifier.height(2.dp))
         CardAmount("¥ " + Money.format(if (over) -remaining else remaining))
         Spacer(Modifier.height(11.dp))

@@ -1,5 +1,7 @@
 package com.local.moneynote
 
+import android.app.Activity
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -24,6 +26,8 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -39,6 +43,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.local.moneynote.notify.PendingPayment
 import com.local.moneynote.ui.screens.AccountDetailScreen
 import com.local.moneynote.ui.screens.AccountEditorDialog
 import com.local.moneynote.ui.screens.AddTransactionScreen
@@ -49,9 +54,20 @@ import com.local.moneynote.ui.screens.SettingsScreen
 import com.local.moneynote.ui.screens.StatsScreen
 import com.local.moneynote.ui.screens.TransactionListScreen
 import com.local.moneynote.ui.theme.MoneyNoteTheme
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
+    /**
+     * 每收到一个新 Intent 就 +1。
+     *
+     * 点通知进来有两种情况：App 没在跑（走 onCreate）和 App 在后台（走 onNewIntent）。
+     * 用一个自增值让 Compose 侧知道「又来一个新 Intent 要处理」，
+     * 否则第二次点通知会毫无反应。
+     */
+    private val intentTick = MutableStateFlow(0)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
@@ -60,17 +76,40 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    AppRoot()
+                    AppRoot(intentTick)
                 }
             }
         }
     }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        intentTick.value += 1
+    }
 }
 
 @Composable
-private fun AppRoot() {
+private fun AppRoot(intentTick: StateFlow<Int>) {
     val vm: AppViewModel = viewModel()
     val nav = rememberNavController()
+    val context = LocalContext.current
+    val activity = context as? Activity
+    val tick by intentTick.collectAsState()
+
+    // 从「微信 支出 ¥12.00，点一下记下来」那条通知点进来时，
+    // 把暂存的支付信息读出来，直接跳记账页并填好金额。
+    LaunchedEffect(tick) {
+        val fromNotification = activity?.intent
+            ?.getBooleanExtra(PendingPayment.EXTRA_FROM_NOTIFICATION, false) == true
+        if (!fromNotification) return@LaunchedEffect
+
+        val pending = PendingPayment.read(context)
+        PendingPayment.clear(context)
+        if (pending != null) {
+            nav.navigate("edit?amount=${pending.amountCents}&income=${pending.isIncome}")
+        }
+    }
 
     NavHost(navController = nav, startDestination = "main") {
 
@@ -97,17 +136,28 @@ private fun AppRoot() {
         }
 
         composable(
-            route = "edit?txId={txId}",
+            route = "edit?txId={txId}&amount={amount}&income={income}",
             arguments = listOf(
                 navArgument("txId") {
                     type = NavType.LongType
                     defaultValue = -1L
+                },
+                // 自动记账通知带进来的预填金额（分）
+                navArgument("amount") {
+                    type = NavType.LongType
+                    defaultValue = 0L
+                },
+                navArgument("income") {
+                    type = NavType.BoolType
+                    defaultValue = false
                 }
             )
         ) { entry ->
             AddTransactionScreen(
                 vm = vm,
                 txId = entry.arguments?.getLong("txId") ?: -1L,
+                prefillAmountCents = entry.arguments?.getLong("amount") ?: 0L,
+                prefillIncome = entry.arguments?.getBoolean("income") ?: false,
                 onDone = { nav.popBackStack() }
             )
         }

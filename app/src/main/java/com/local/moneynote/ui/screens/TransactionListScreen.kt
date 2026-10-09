@@ -45,6 +45,7 @@ import com.local.moneynote.AppViewModel
 import com.local.moneynote.Granularity
 import com.local.moneynote.core.Dates
 import com.local.moneynote.core.Money
+import com.local.moneynote.data.BudgetPeriod
 import com.local.moneynote.data.TransactionRow
 import com.local.moneynote.data.TxKind
 import com.local.moneynote.ui.components.AccountBalanceList
@@ -97,8 +98,11 @@ fun TransactionListScreen(
     val carryoverIn by vm.carryoverIn.collectAsState()
     val accounts by vm.accounts.collectAsState()
     val netByAccount by vm.netByAccount.collectAsState()
+    val allCategories by vm.allCategories.collectAsState()
 
     var deleteTarget by remember { mutableStateOf<TransactionRow?>(null) }
+    // 预算卡右上角「编辑」打开的对话框
+    var showBudgetEditor by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     // 三张卡片：[资产] [收支] [预算]，默认停在中间的收支
@@ -151,7 +155,8 @@ fun TransactionListScreen(
                     budgetCents = totalBudget?.amountCents ?: 0L,
                     spentCents = expense,
                     carryoverIn = carryoverIn,
-                    remainingDays = remainingDays
+                    remainingDays = remainingDays,
+                    onEdit = { showBudgetEditor = true }
                 )
 
                 else -> HomeSummaryCard(
@@ -257,6 +262,25 @@ fun TransactionListScreen(
             },
             dismissButton = {
                 TextButton(onClick = { deleteTarget = null }) { Text("取消") }
+            }
+        )
+    }
+
+    // 预算卡右上角的「编辑」：就地改总预算，不用跳到预算页去
+    if (showBudgetEditor) {
+        BudgetEditorDialog(
+            categories = allCategories.filter { it.kind == TxKind.EXPENSE },
+            initialCategoryId = null,
+            existing = totalBudget,
+            canDelete = totalBudget != null,
+            onDismiss = { showBudgetEditor = false },
+            onDelete = {
+                totalBudget?.let { b -> scope.launch { vm.repo.deleteBudget(b) } }
+                showBudgetEditor = false
+            },
+            onSave = { _, cents ->
+                scope.launch { vm.repo.upsertBudget(null, cents, BudgetPeriod.MONTHLY) }
+                showBudgetEditor = false
             }
         )
     }

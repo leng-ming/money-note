@@ -88,6 +88,9 @@ import java.time.ZoneOffset
 fun AddTransactionScreen(
     vm: AppViewModel,
     txId: Long,
+    /** 从自动记账通知进来时预填的金额（分）；0 表示不预填 */
+    prefillAmountCents: Long = 0L,
+    prefillIncome: Boolean = false,
     onDone: () -> Unit
 ) {
     val accounts by vm.accounts.collectAsState()
@@ -116,7 +119,7 @@ fun AddTransactionScreen(
     val isEditing = txId > 0L
 
     // 编辑模式：回填原数据
-    LaunchedEffect(txId) {
+    LaunchedEffect(txId, prefillAmountCents) {
         if (isEditing) {
             vm.repo.transactionById(txId)?.let { t ->
                 kind = t.kind
@@ -128,6 +131,11 @@ fun AddTransactionScreen(
                 // 编辑时沿用原账单的账户，不要被"账户记忆"覆盖
                 accountTouched = true
             }
+        } else if (prefillAmountCents > 0L) {
+            // 从自动记账通知进来的：金额和收支方向先填好，
+            // 分类故意留空让用户点一下 —— 通知里没有分类信息，猜不如不猜
+            amountText = Money.formatPlain(prefillAmountCents)
+            kind = if (prefillIncome) TxKind.INCOME else TxKind.EXPENSE
         }
         loaded = true
     }

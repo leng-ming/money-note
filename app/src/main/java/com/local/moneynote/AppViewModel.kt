@@ -131,6 +131,17 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         .flatMapLatest { r -> repo.observeSumByCategory(TxKind.EXPENSE, r.first, r.last + 1) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT), emptyList())
 
+    /**
+     * 同上，但**不把二级分类归并到一级**。
+     *
+     * 分类预算必须用这份数据：给「购物 → 数码」这种二级分类设预算时，
+     * 归并版里根本没有「数码」这个 key，查出来永远是 0（用户实际踩到的 bug）。
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val monthExpenseByExactCategory: StateFlow<List<CategorySum>> = anchorMonthRange
+        .flatMapLatest { r -> repo.observeSumByExactCategory(TxKind.EXPENSE, r.first, r.last + 1) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT), emptyList())
+
     /* ---------------- 预算转结 ---------------- */
 
     /** 本月从以前月份转进来的预算总额 */

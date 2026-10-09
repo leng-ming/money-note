@@ -109,6 +109,10 @@ class MoneyRepository(private val db: AppDatabase) {
     fun observeSumByCategory(kind: TxKind, start: Long, end: Long): Flow<List<CategorySum>> =
         transactions.observeSumByCategory(kind, start, end)
 
+    /** 精确到每个分类、不归并到一级。分类预算判定已用要用它 */
+    fun observeSumByExactCategory(kind: TxKind, start: Long, end: Long): Flow<List<CategorySum>> =
+        transactions.observeSumByExactCategory(kind, start, end)
+
     fun observeSumByDay(kind: TxKind, start: Long, end: Long): Flow<List<DaySum>> =
         transactions.observeSumByDay(kind, start, end)
 

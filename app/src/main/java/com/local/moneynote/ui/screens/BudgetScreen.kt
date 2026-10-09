@@ -5,23 +5,29 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Repeat
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -89,7 +95,28 @@ fun BudgetScreen(
 
     val totalBudget = budgets.firstOrNull { it.categoryId == null }
     val catBudgets = budgets.filter { it.categoryId != null }
-    val spentMap = remember(expenseCats) { expenseCats.associate { it.categoryId to it.totalCents } }
+
+    /**
+     * 某个分类预算的「已用」= 该分类自己 + 它下面所有子分类。
+     *
+     * 之前这里直接用 [AppViewModel.monthExpenseByCategory]，而那份数据把二级分类
+     * 归并到了一级头上，于是给「购物 → 数码」这类二级分类设的预算，
+     * 查出来永远是 0 —— 用户实际踩到的 bug。
+     * 换成不归并的版本后，一级 / 二级设预算都能算对。
+     */
+    val exactCats by vm.monthExpenseByExactCategory.collectAsState()
+    val exactMap = remember(exactCats) {
+        exactCats.associate { it.categoryId to it.totalCents }
+    }
+    val childIdsOf = remember(categories) {
+        categories
+            .filter { it.parentId != null }
+            .groupBy { it.parentId!! }
+            .mapValues { entry -> entry.value.map { it.id } }
+    }
+    fun spentOf(categoryId: Long): Long =
+        (exactMap[categoryId] ?: 0L) +
+            (childIdsOf[categoryId]?.sumOf { exactMap[it] ?: 0L } ?: 0L)
 
     var editingCategoryId by remember { mutableStateOf<Long?>(null) }
     var editingExisting by remember { mutableStateOf(false) }
@@ -181,7 +208,7 @@ fun BudgetScreen(
                 CategoryBudgetRow(
                     category = cat,
                     budget = b,
-                    spent = spentMap[b.categoryId] ?: 0L,
+                    spent = spentOf(b.categoryId ?: -1L),
                     onEdit = {
                         editingCategoryId = b.categoryId
                         editingExisting = true
@@ -436,8 +463,9 @@ private fun BudgetBar(ratio: Float) {
 /*  预算编辑弹层                                                       */
 /* ------------------------------------------------------------------ */
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun BudgetEditorDialog(
+fun BudgetEditorDialog(
     categories: List<CategoryEntity>,
     initialCategoryId: Long?,
     existing: BudgetEntity?,
@@ -450,7 +478,22 @@ private fun BudgetEditorDialog(
     var amountText by remember {
         mutableStateOf(existing?.let { Money.formatPlain(it.amountCents) } ?: "")
     }
+    var query by remember { mutableStateOf("") }
     val isTotal = selectedCategoryId == null
+
+    // 搜索时连父分类名一起匹配 —— 想找「数码」的人也可能顺手打「购物」
+    val filteredCategories = remember(categories, query) {
+        if (query.isBlank()) {
+            categories
+        } else {
+            val parentNames = categories.associate { it.id to it.name }
+            categories.filter { c ->
+                c.name.contains(query, ignoreCase = true) ||
+                    (c.parentId?.let { parentNames[it] }
+                        ?.contains(query, ignoreCase = true) == true)
+            }
+        }
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -484,25 +527,50 @@ private fun BudgetEditorDialog(
                 Spacer(Modifier.height(12.dp))
                 Text("适用分类", style = MaterialTheme.typography.labelMedium, color = TextSecondary)
                 Spacer(Modifier.height(6.dp))
-                // 总预算 + 各支出分类
-                androidx.compose.foundation.lazy.LazyRow(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+
+                // 这里原来是个横向滚动的 LazyRow，分类一多就得一直往后拉
+                // （用户要找「数码」得滑很久）。改成「搜索 + 自动换行 + 限高可滚」。
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    placeholder = {
+                        Text("搜索分类，例如「数码」", style = MaterialTheme.typography.bodySmall)
+                    },
+                    singleLine = true,
+                    leadingIcon = {
+                        Icon(Icons.Filled.Search, contentDescription = null, modifier = Modifier.size(18.dp))
+                    },
+                    textStyle = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(8.dp))
+
+                Box(
+                    modifier = Modifier
+                        .heightIn(max = 210.dp)
+                        .verticalScroll(rememberScrollState())
                 ) {
-                    item {
-                        BudgetCategoryChip(
-                            label = "总预算",
-                            color = BrandGreen,
-                            selected = isTotal,
-                            onClick = { selectedCategoryId = null }
-                        )
-                    }
-                    items(categories, key = { it.id }) { c ->
-                        BudgetCategoryChip(
-                            label = c.name,
-                            color = parseHexColor(c.colorHex),
-                            selected = selectedCategoryId == c.id,
-                            onClick = { selectedCategoryId = c.id }
-                        )
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        // 搜索时把「总预算」收起来，免得干扰结果
+                        if (query.isBlank()) {
+                            BudgetCategoryChip(
+                                label = "总预算",
+                                color = BrandGreen,
+                                selected = isTotal,
+                                onClick = { selectedCategoryId = null }
+                            )
+                        }
+                        filteredCategories.forEach { c ->
+                            BudgetCategoryChip(
+                                label = c.name,
+                                color = parseHexColor(c.colorHex),
+                                selected = selectedCategoryId == c.id,
+                                onClick = { selectedCategoryId = c.id }
+                            )
+                        }
                     }
                 }
             }

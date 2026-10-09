@@ -217,6 +217,25 @@ interface TransactionDao {
     )
     fun observeSumByDay(kind: TxKind, start: Long, end: Long): Flow<List<DaySum>>
 
+    /**
+     * 按「精确分类」汇总，**不归并到一级**。
+     *
+     * 分类预算必须用这个：上面的 [observeSumByCategory] 把二级分类的账都算到一级头上，
+     * 于是给二级分类（例如「购物 → 数码」）设的预算，已用永远显示 0。
+     * 这里保留每个分类自己的金额，由界面按「自己 + 所有子分类」合成，
+     * 这样无论预算挂在一级还是二级都算得对。
+     */
+    @Query(
+        "SELECT t.category_id AS categoryId, c.name AS name, " +
+            "c.icon_key AS iconKey, c.color_hex AS colorHex, " +
+            "SUM(t.amount_cents) AS totalCents, COUNT(t.id) AS cnt " +
+            "FROM transactions t JOIN categories c ON c.id = t.category_id " +
+            "WHERE t.kind = :kind AND t.exclude_from_stats = 0 " +
+            "AND t.occurred_at >= :start AND t.occurred_at < :end " +
+            "GROUP BY t.category_id ORDER BY totalCents DESC"
+    )
+    fun observeSumByExactCategory(kind: TxKind, start: Long, end: Long): Flow<List<CategorySum>>
+
     /** 某分类（或全部分类）在区间内的已用支出，预算用 */
     @Query(
         "SELECT COALESCE(SUM(amount_cents), 0) FROM transactions " +
