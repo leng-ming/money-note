@@ -13,6 +13,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
@@ -30,6 +32,7 @@ import com.local.moneynote.data.TransactionRow
 import com.local.moneynote.data.TxKind
 import com.local.moneynote.ui.CatIcons
 import com.local.moneynote.ui.parseHexColor
+import com.local.moneynote.ui.theme.BrandGreen
 import com.local.moneynote.ui.theme.CardBg
 import com.local.moneynote.ui.theme.ExpenseRed
 import com.local.moneynote.ui.theme.IncomeGreen
@@ -45,7 +48,22 @@ fun TransactionRowCard(
     modifier: Modifier = Modifier
 ) {
     val catColor = parseHexColor(row.categoryColor)
+    val isTransfer = row.kind == TxKind.TRANSFER
     val isExpense = row.kind == TxKind.EXPENSE
+
+    // 转账没有分类，标题直接写成「从 → 到」，一眼就知道钱去哪了
+    val title = if (isTransfer) {
+        "${row.accountName} → ${row.toAccountName}"
+    } else {
+        row.categoryName
+    }
+    // 转账的副标题优先显示手续费 —— 那是转账唯一容易漏记的信息
+    val subtitle = when {
+        isTransfer && row.feeCents > 0L ->
+            "手续费 ¥" + Money.format(row.feeCents) + "，实际到账 ¥" +
+                Money.format(row.amountCents - row.feeCents)
+        else -> row.note
+    }
 
     Card(
         modifier = modifier
@@ -70,7 +88,11 @@ fun TransactionRowCard(
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
-                    imageVector = CatIcons.of(row.categoryIcon),
+                    imageVector = if (isTransfer) {
+                        Icons.Filled.SwapHoriz
+                    } else {
+                        CatIcons.of(row.categoryIcon)
+                    },
                     contentDescription = null,
                     tint = catColor,
                     modifier = Modifier.size(21.dp)
@@ -79,13 +101,15 @@ fun TransactionRowCard(
             Spacer(Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    row.categoryName,
+                    title,
                     style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = FontWeight.Medium
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
-                if (row.note.isNotBlank()) {
+                if (subtitle.isNotBlank()) {
                     Text(
-                        row.note,
+                        subtitle,
                         style = MaterialTheme.typography.bodySmall,
                         color = TextSecondary,
                         maxLines = 1,
@@ -96,16 +120,28 @@ fun TransactionRowCard(
             Spacer(Modifier.width(8.dp))
             Column(horizontalAlignment = Alignment.End) {
                 Text(
-                    text = (if (isExpense) "-" else "+") + Money.format(row.amountCents),
+                    text = when {
+                        // 转账既不是花掉也不是赚到，所以不带正负号
+                        isTransfer -> Money.format(row.amountCents)
+                        isExpense -> "-" + Money.format(row.amountCents)
+                        else -> "+" + Money.format(row.amountCents)
+                    },
                     style = MaterialTheme.typography.bodyLarge,
                     fontWeight = FontWeight.SemiBold,
-                    color = if (isExpense) ExpenseRed else IncomeGreen
+                    color = when {
+                        isTransfer -> BrandGreen
+                        isExpense -> ExpenseRed
+                        else -> IncomeGreen
+                    }
                 )
-                Text(
-                    row.accountName,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = TextSecondary
-                )
+                // 转账的标题里已经有账户了，这里就不再重复
+                if (!isTransfer) {
+                    Text(
+                        row.accountName,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = TextSecondary
+                    )
+                }
             }
         }
     }

@@ -6,8 +6,13 @@ import androidx.room.Index
 import androidx.room.PrimaryKey
 import androidx.room.TypeConverter
 
-/** 收支方向 */
-enum class TxKind { EXPENSE, INCOME }
+/**
+ * 账目方向。
+ *
+ * TRANSFER 是「账户之间挪钱」（比如微信 → 银行卡），它既不是支出也不是收入，
+ * 所以所有统计查询都按 kind 过滤、天然把它排除在外 —— 转账不该影响收支报表。
+ */
+enum class TxKind { EXPENSE, INCOME, TRANSFER }
 
 /** 账户类型 */
 enum class AccountType { CASH, WECHAT, ALIPAY, BANK, CREDIT, OTHER }
@@ -67,8 +72,14 @@ data class TransactionEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0L,
     @ColumnInfo(name = "amount_cents") val amountCents: Long,
     val kind: TxKind,
+    /** 支出/收入的所属账户；转账时表示**转出**账户 */
     @ColumnInfo(name = "account_id") val accountId: Long,
-    @ColumnInfo(name = "category_id") val categoryId: Long,
+    /** 转账的**转入**账户，非转账时为 null */
+    @ColumnInfo(name = "to_account_id") val toAccountId: Long? = null,
+    /** 转账手续费。实际到账 = amountCents - feeCents */
+    @ColumnInfo(name = "fee_cents") val feeCents: Long = 0L,
+    /** 转账没有分类，所以这里允许为 null */
+    @ColumnInfo(name = "category_id") val categoryId: Long?,
     val note: String = "",
     @ColumnInfo(name = "occurred_at") val occurredAt: Long,
     @ColumnInfo(name = "created_at") val createdAt: Long = System.currentTimeMillis(),

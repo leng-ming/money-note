@@ -190,6 +190,9 @@ class BackupTest {
         amountCents = 2350L,
         kind = TxKind.EXPENSE,
         accountId = 1L,
+        // 转账专用字段，这里测的是普通支出所以都留空
+        toAccountId = null,
+        feeCents = 0L,
         categoryId = 1L,
         note = note,
         occurredAt = Dates.toMillis(LocalDate.of(2026, 9, 26), java.time.LocalTime.of(12, 30)),
@@ -197,6 +200,7 @@ class BackupTest {
         categoryName = "餐饮",
         categoryIcon = "food",
         categoryColor = "#FFEF6C00",
-        accountName = "现金"
+        accountName = "现金",
+        toAccountName = ""
     )
 }

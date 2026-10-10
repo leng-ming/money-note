@@ -70,7 +70,10 @@ object Backup {
         put("amountCents", t.amountCents)
         put("kind", t.kind.name)
         put("accountId", t.accountId)
-        put("categoryId", t.categoryId)
+        // 转账专用字段
+        put("toAccountId", t.toAccountId ?: JSONObject.NULL)
+        put("feeCents", t.feeCents)
+        put("categoryId", t.categoryId ?: JSONObject.NULL)
         put("note", t.note)
         put("occurredAt", t.occurredAt)
         put("createdAt", t.createdAt)
@@ -149,7 +152,10 @@ object Backup {
                     amountCents = o.getLong("amountCents"),
                     kind = runCatching { TxKind.valueOf(o.getString("kind")) }.getOrDefault(TxKind.EXPENSE),
                     accountId = o.getLong("accountId"),
-                    categoryId = o.getLong("categoryId"),
+                    // v1.7 之前导出的备份里没这两个字段，缺失时按「非转账」处理
+                    toAccountId = if (o.isNull("toAccountId")) null else o.optLong("toAccountId"),
+                    feeCents = o.optLong("feeCents", 0L),
+                    categoryId = if (o.isNull("categoryId")) null else o.getLong("categoryId"),
                     note = o.optString("note", ""),
                     occurredAt = o.optLong("occurredAt", System.currentTimeMillis()),
                     createdAt = o.optLong("createdAt", System.currentTimeMillis()),

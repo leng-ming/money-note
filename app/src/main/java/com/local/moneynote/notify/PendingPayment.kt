@@ -114,4 +114,34 @@ object PendingPayment {
             }
         )
     }
+
+    /**
+     * 发一条测试提醒，用来验证「通知链路」通不通。
+     *
+     * 自动记账涉及两个独立授权（通知使用权 + 发通知权限），
+     * 任何一个没给都会表现成「什么都没发生」，用户很难自己判断卡在哪一步。
+     * 有了这个按钮，点一下就知道链路到底通没通。
+     */
+    fun postTest(context: Context) {
+        ensureChannel(context)
+
+        val intent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        val flags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        val pending = PendingIntent.getActivity(context, 0, intent, flags)
+
+        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setContentTitle("通知链路正常 ✓")
+            .setContentText("能看到这条，说明自动记账的提醒可以正常发出来")
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setAutoCancel(true)
+            .setContentIntent(pending)
+            .build()
+
+        runCatching {
+            NotificationManagerCompat.from(context).notify(NOTIFICATION_ID + 1, notification)
+        }
+    }
 }

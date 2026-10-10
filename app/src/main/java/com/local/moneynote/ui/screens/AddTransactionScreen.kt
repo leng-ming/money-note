@@ -22,11 +22,14 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Backspace
 import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -56,6 +59,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -103,6 +107,9 @@ fun AddTransactionScreen(
     var amountText by remember { mutableStateOf("") }
     var categoryId by remember { mutableStateOf<Long?>(null) }
     var accountId by remember { mutableStateOf<Long?>(null) }
+    // 转账专用：转入账户与手续费。实际到账 = 金额 − 手续费
+    var toAccountId by remember { mutableStateOf<Long?>(null) }
+    var feeText by remember { mutableStateOf("") }
     var note by remember { mutableStateOf("") }
     var occurredAt by remember { mutableStateOf(System.currentTimeMillis()) }
     var loaded by remember { mutableStateOf(false) }
@@ -110,6 +117,7 @@ fun AddTransactionScreen(
     var accountTouched by remember { mutableStateOf(false) }
 
     var showAccountPicker by remember { mutableStateOf(false) }
+    var showToAccountPicker by remember { mutableStateOf(false) }
     var showDatePicker by remember { mutableStateOf(false) }
     var showNoteDialog by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
@@ -128,6 +136,8 @@ fun AddTransactionScreen(
                 accountId = t.accountId
                 note = t.note
                 occurredAt = t.occurredAt
+                toAccountId = t.toAccountId
+                feeText = if (t.feeCents > 0L) Money.formatPlain(t.feeCents) else ""
                 // 编辑时沿用原账单的账户，不要被"账户记忆"覆盖
                 accountTouched = true
             }
@@ -186,16 +196,39 @@ fun AddTransactionScreen(
             toast("请输入金额")
             return
         }
-        val cid = categoryId
-        if (cid == null) {
-            toast("请选择分类")
-            return
-        }
         val aid = accountId
         if (aid == null) {
             toast("请选择账户")
             return
         }
+
+        val isTransfer = kind == TxKind.TRANSFER
+        val fee = if (isTransfer) (Money.parseToCents(feeText) ?: 0L) else 0L
+        val toAid = toAccountId
+
+        if (isTransfer) {
+            if (toAid == null) {
+                toast("请选择转入账户")
+                return
+            }
+            if (toAid == aid) {
+                toast("转出和转入不能是同一个账户")
+                return
+            }
+            if (fee >= cents) {
+                // 手续费吃光本金的话，转入账户等于白收，肯定是填错了
+                toast("手续费不能大于等于转账金额")
+                return
+            }
+        }
+
+        val cid = categoryId
+        // 转账不属于任何分类，所以只在支出/收入时要求选分类
+        if (!isTransfer && cid == null) {
+            toast("请选择分类")
+            return
+        }
+
         scope.launch {
             if (isEditing) {
                 val old = vm.repo.transactionById(txId)
@@ -207,7 +240,9 @@ fun AddTransactionScreen(
                             amountCents = cents,
                             kind = kind,
                             accountId = aid,
-                            categoryId = cid,
+                            toAccountId = if (isTransfer) toAid else null,
+                            feeCents = if (isTransfer) fee else 0L,
+                            categoryId = if (isTransfer) null else cid,
                             note = note,
                             occurredAt = occurredAt
                         )
@@ -218,9 +253,11 @@ fun AddTransactionScreen(
                     amountCents = cents,
                     kind = kind,
                     accountId = aid,
-                    categoryId = cid,
+                    categoryId = if (isTransfer) null else cid,
                     note = note,
-                    occurredAt = occurredAt
+                    occurredAt = occurredAt,
+                    toAccountId = toAid,
+                    feeCents = fee
                 )
             }
             onDone()
@@ -265,7 +302,23 @@ fun AddTransactionScreen(
         // ---------- 金额 ----------
         AmountDisplay(amountText = amountText, kind = kind)
 
-        // ---------- 分类 ----------
+        // ---------- 分类 / 转账 ----------
+        if (kind == TxKind.TRANSFER) {
+            // 转账不属于任何分类，取而代之的是「从哪 → 到哪 + 手续费」
+            TransferPanel(
+                accounts = accounts,
+                fromAccount = currentAccount,
+                toAccount = accounts.firstOrNull { it.id == toAccountId },
+                amountText = amountText,
+                feeText = feeText,
+                onFeeChange = { raw ->
+                    feeText = filterMoneyInput(feeText, raw)
+                },
+                onPickFrom = { showAccountPicker = true },
+                onPickTo = { showToAccountPicker = true },
+                modifier = Modifier.weight(1f)
+            )
+        } else {
         LazyVerticalGrid(
             columns = GridCells.Fixed(5),
             modifier = Modifier
@@ -315,6 +368,7 @@ fun AddTransactionScreen(
                 }
             }
         }
+        }
 
         // 分类网格里只高亮到一级，所以这里明确写出当前到底选的是哪个细分
         val selectedPath = selectedCategory?.let { c ->
@@ -337,13 +391,16 @@ fun AddTransactionScreen(
                 .padding(horizontal = 12.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            InfoChip(
-                icon = { Icon(AccountStyles.icon(currentAccount?.type ?: com.local.moneynote.data.AccountType.CASH), null, Modifier.size(16.dp), tint = TextSecondary) },
-                text = currentAccount?.name ?: "选择账户",
-                modifier = Modifier.weight(1f),
-                onClick = { showAccountPicker = true }
-            )
-            Spacer(Modifier.width(8.dp))
+            // 转账的账户在 TransferPanel 里选（要从哪、到哪各一个），这里只留日期
+            if (kind != TxKind.TRANSFER) {
+                InfoChip(
+                    icon = { Icon(AccountStyles.icon(currentAccount?.type ?: com.local.moneynote.data.AccountType.CASH), null, Modifier.size(16.dp), tint = TextSecondary) },
+                    text = currentAccount?.name ?: "选择账户",
+                    modifier = Modifier.weight(1f),
+                    onClick = { showAccountPicker = true }
+                )
+                Spacer(Modifier.width(8.dp))
+            }
             InfoChip(
                 icon = { Icon(Icons.Filled.CalendarMonth, null, Modifier.size(16.dp), tint = TextSecondary) },
                 text = Dates.labelDayFull(occurredAt),
@@ -499,6 +556,55 @@ fun AddTransactionScreen(
         )
     }
 
+    // 转账的「转入账户」
+    if (showToAccountPicker) {
+        AlertDialog(
+            onDismissRequest = { showToAccountPicker = false },
+            title = { Text("转入哪个账户") },
+            text = {
+                Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                    accounts.forEach { acc ->
+                        val balance = acc.initialBalanceCents + (netByAccount[acc.id] ?: 0L)
+                        val isSameAsFrom = acc.id == accountId
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                // 转出和转入填同一个账户没有意义，直接不让点
+                                .clickable(enabled = !isSameAsFrom) {
+                                    toAccountId = acc.id
+                                    showToAccountPicker = false
+                                }
+                                .padding(horizontal = 8.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                AccountStyles.icon(acc.type),
+                                contentDescription = null,
+                                tint = if (isSameAsFrom) TextSecondary else parseHexColor(acc.colorHex),
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(Modifier.width(12.dp))
+                            Text(
+                                acc.name + if (isSameAsFrom) "（转出账户）" else "",
+                                modifier = Modifier.weight(1f),
+                                color = if (isSameAsFrom) TextSecondary else TextPrimary
+                            )
+                            Text(
+                                "¥ " + Money.format(balance),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextSecondary
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showToAccountPicker = false }) { Text("关闭") }
+            }
+        )
+    }
+
     if (showDatePicker) {
         val initialUtc = Dates.toLocalDate(occurredAt)
             .atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
@@ -598,6 +704,13 @@ private fun KindSwitch(
             selected = kind == TxKind.INCOME,
             selectedColor = IncomeGreen,
             onClick = { onKindChange(TxKind.INCOME) }
+        )
+        Spacer(Modifier.width(10.dp))
+        KindTab(
+            text = "转账",
+            selected = kind == TxKind.TRANSFER,
+            selectedColor = BrandGreen,
+            onClick = { onKindChange(TxKind.TRANSFER) }
         )
     }
 }
@@ -853,4 +966,144 @@ private fun FuncButton(
             )
         }
     }
+}
+
+/* ------------------------------------------------------------------ */
+/*  转账                                                                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * 转账面板：从哪 → 到哪、手续费、实际到账。
+ *
+ * 实际到账 = 转账金额 − 手续费，这个是实时算出来给用户看的 ——
+ * 转出账户扣的是全额，转入账户收到的是扣完手续费的部分。
+ */
+@Composable
+private fun TransferPanel(
+    accounts: List<AccountEntity>,
+    fromAccount: AccountEntity?,
+    toAccount: AccountEntity?,
+    amountText: String,
+    feeText: String,
+    onFeeChange: (String) -> Unit,
+    onPickFrom: () -> Unit,
+    onPickTo: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val amount = Money.parseToCents(amountText) ?: 0L
+    val fee = Money.parseToCents(feeText) ?: 0L
+    val arrived = (amount - fee).coerceAtLeast(0L)
+
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        TransferAccountRow(
+            label = "从",
+            account = fromAccount,
+            placeholder = "选择转出账户",
+            onClick = onPickFrom
+        )
+        TransferAccountRow(
+            label = "到",
+            account = toAccount,
+            placeholder = "选择转入账户",
+            onClick = onPickTo
+        )
+
+        // 手续费
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant)
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("手续费", style = MaterialTheme.typography.bodyMedium, color = TextSecondary)
+            Spacer(Modifier.width(14.dp))
+            BasicTextField(
+                value = feeText,
+                onValueChange = onFeeChange,
+                singleLine = true,
+                textStyle = MaterialTheme.typography.bodyLarge.copy(
+                    color = MaterialTheme.colorScheme.onSurface
+                ),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                modifier = Modifier.weight(1f),
+                decorationBox = { inner ->
+                    if (feeText.isEmpty()) {
+                        Text(
+                            "0.00",
+                            color = TextSecondary,
+                            style = MaterialTheme.typography.bodyLarge
+                        )
+                    }
+                    inner()
+                }
+            )
+            Text("元", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+        }
+
+        // 实际到账
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(BrandGreen.copy(alpha = 0.10f))
+                .padding(horizontal = 14.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("实际到账", style = MaterialTheme.typography.bodyMedium, color = BrandGreen)
+            Spacer(Modifier.weight(1f))
+            Text(
+                "¥ " + Money.format(arrived),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = BrandGreen
+            )
+        }
+    }
+}
+
+@Composable
+private fun TransferAccountRow(
+    label: String,
+    account: AccountEntity?,
+    placeholder: String,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 15.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(label, style = MaterialTheme.typography.bodyMedium, color = TextSecondary)
+        Spacer(Modifier.width(14.dp))
+        Text(
+            account?.name ?: placeholder,
+            style = MaterialTheme.typography.bodyLarge,
+            color = if (account == null) TextSecondary else MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.weight(1f)
+        )
+        Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = TextSecondary)
+    }
+}
+
+/**
+ * 金额输入的过滤：只留数字和一个小数点，最多两位小数。
+ * 这次输入不合法时返回 [current]，也就是保持原样，不让非法字符进到输入框。
+ */
+private fun filterMoneyInput(current: String, raw: String): String {
+    val filtered = raw.filter { it.isDigit() || it == '.' }
+    val ok = filtered.count { it == '.' } <= 1 &&
+        filtered.substringAfter('.', "").length <= 2 &&
+        filtered.length <= 12
+    return if (ok) filtered else current
 }

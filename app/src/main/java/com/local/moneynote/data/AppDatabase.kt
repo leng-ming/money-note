@@ -17,7 +17,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         RecurringEntity::class,
         BudgetCarryoverEntity::class
     ],
-    version = 3,
+    version = 4,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -42,7 +42,7 @@ abstract class AppDatabase : RoomDatabase() {
                     "money_note.db"
                 )
                     .addCallback(SeedCallback)
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                     .build()
                     .also { INSTANCE = it }
             }
@@ -78,6 +78,60 @@ abstract class AppDatabase : RoomDatabase() {
                         "`to_month` INTEGER NOT NULL, " +
                         "`amount_cents` INTEGER NOT NULL, " +
                         "`created_at` INTEGER NOT NULL)"
+                )
+            }
+        }
+
+        /**
+         * v3 → v4：支持「转账」。
+         *
+         * 加了 to_account_id 和 fee_cents 两列，同时把 category_id 改成**可空**
+         * （转账不属于任何分类）。
+         *
+         * SQLite 不支持修改列的可空性，所以只能走标准的「重建表」三步：
+         * 建新表 → 把老数据搬过去 → 删老表改名。**数据一条都不会丢**。
+         * 表结构必须和 [TransactionEntity] 完全一致，否则 Room 校验 schema 会直接抛异常。
+         */
+        private val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `transactions_new` (" +
+                        "`id` INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT, " +
+                        "`amount_cents` INTEGER NOT NULL, " +
+                        "`kind` TEXT NOT NULL, " +
+                        "`account_id` INTEGER NOT NULL, " +
+                        "`to_account_id` INTEGER, " +
+                        "`fee_cents` INTEGER NOT NULL DEFAULT 0, " +
+                        "`category_id` INTEGER, " +
+                        "`note` TEXT NOT NULL, " +
+                        "`occurred_at` INTEGER NOT NULL, " +
+                        "`created_at` INTEGER NOT NULL, " +
+                        "`updated_at` INTEGER NOT NULL, " +
+                        "`exclude_from_stats` INTEGER NOT NULL)"
+                )
+                db.execSQL(
+                    "INSERT INTO `transactions_new` (" +
+                        "`id`, `amount_cents`, `kind`, `account_id`, `to_account_id`, `fee_cents`, " +
+                        "`category_id`, `note`, `occurred_at`, `created_at`, `updated_at`, `exclude_from_stats`) " +
+                        "SELECT `id`, `amount_cents`, `kind`, `account_id`, NULL, 0, " +
+                        "`category_id`, `note`, `occurred_at`, `created_at`, `updated_at`, `exclude_from_stats` " +
+                        "FROM `transactions`"
+                )
+                db.execSQL("DROP TABLE `transactions`")
+                db.execSQL("ALTER TABLE `transactions_new` RENAME TO `transactions`")
+
+                // 索引跟着一起重建，不然查询会退化成全表扫描
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_transactions_occurred_at` " +
+                        "ON `transactions` (`occurred_at`)"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_transactions_category_id` " +
+                        "ON `transactions` (`category_id`)"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_transactions_account_id` " +
+                        "ON `transactions` (`account_id`)"
                 )
             }
         }

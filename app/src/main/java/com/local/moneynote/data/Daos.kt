@@ -19,14 +19,21 @@ data class TransactionRow(
     val amountCents: Long,
     val kind: TxKind,
     val accountId: Long,
-    val categoryId: Long,
+    /** 转账的转入账户，非转账为 null */
+    val toAccountId: Long?,
+    /** 转账手续费 */
+    val feeCents: Long,
+    /** 转账没有分类，所以可空 */
+    val categoryId: Long?,
     val note: String,
     val occurredAt: Long,
     val excludeFromStats: Boolean,
     val categoryName: String,
     val categoryIcon: String,
     val categoryColor: String,
-    val accountName: String
+    val accountName: String,
+    /** 转入账户名，非转账为空串 */
+    val toAccountName: String
 )
 
 data class CategorySum(
@@ -67,16 +74,30 @@ interface AccountDao {
     @Delete
     suspend fun delete(e: AccountEntity)
 
-    @Query("SELECT COUNT(*) FROM transactions WHERE account_id = :id")
+    @Query("SELECT COUNT(*) FROM transactions WHERE account_id = :id OR to_account_id = :id")
     suspend fun txCount(id: Long): Int
 
     @Query("SELECT * FROM accounts")
     suspend fun allOnce(): List<AccountEntity>
 
+    /**
+     * 每个账户的净变动（初始余额之外的流水合计）。
+     *
+     * 转账要算两次：转出账户扣全额，转入账户加「金额 − 手续费」。
+     * 用 UNION ALL 拼成「账户 → 变动额」的长表再 GROUP BY，
+     * 比在一个 CASE 里塞进所有情况清楚得多，也不容易写漏。
+     */
     @Query(
-        "SELECT account_id AS accountId, " +
-            "COALESCE(SUM(CASE WHEN kind = 'INCOME' THEN amount_cents ELSE -amount_cents END), 0) AS netCents " +
-            "FROM transactions GROUP BY account_id"
+        "SELECT acc AS accountId, COALESCE(SUM(delta), 0) AS netCents FROM (" +
+            "SELECT account_id AS acc, -amount_cents AS delta FROM transactions WHERE kind = 'EXPENSE' " +
+            "UNION ALL " +
+            "SELECT account_id AS acc, amount_cents AS delta FROM transactions WHERE kind = 'INCOME' " +
+            "UNION ALL " +
+            "SELECT account_id AS acc, -amount_cents AS delta FROM transactions WHERE kind = 'TRANSFER' " +
+            "UNION ALL " +
+            "SELECT to_account_id AS acc, amount_cents - fee_cents AS delta FROM transactions " +
+            "WHERE kind = 'TRANSFER' AND to_account_id IS NOT NULL" +
+            ") GROUP BY acc"
     )
     fun observeNetByAccount(): Flow<List<AccountNet>>
 }
@@ -138,16 +159,19 @@ interface TransactionDao {
 
     @Query(
         "SELECT t.id AS id, t.amount_cents AS amountCents, t.kind AS kind, " +
-            "t.account_id AS accountId, t.category_id AS categoryId, t.note AS note, " +
+            "t.account_id AS accountId, t.to_account_id AS toAccountId, t.fee_cents AS feeCents, " +
+            "t.category_id AS categoryId, t.note AS note, " +
             "t.occurred_at AS occurredAt, t.exclude_from_stats AS excludeFromStats, " +
-            "c.name AS categoryName, " +
-            "COALESCE(p.icon_key, c.icon_key) AS categoryIcon, " +
-            "COALESCE(p.color_hex, c.color_hex) AS categoryColor, " +
-            "a.name AS accountName " +
+            "COALESCE(c.name, '') AS categoryName, " +
+            "COALESCE(p.icon_key, c.icon_key, 'more') AS categoryIcon, " +
+            "COALESCE(p.color_hex, c.color_hex, '#FF607D8B') AS categoryColor, " +
+            "a.name AS accountName, COALESCE(ta.name, '') AS toAccountName " +
             "FROM transactions t " +
-            "JOIN categories c ON c.id = t.category_id " +
+            // 转账没有分类，所以这里必须是 LEFT JOIN，否则转账记录整条都查不出来
+            "LEFT JOIN categories c ON c.id = t.category_id " +
             "LEFT JOIN categories p ON p.id = c.parent_id " +
             "JOIN accounts a ON a.id = t.account_id " +
+            "LEFT JOIN accounts ta ON ta.id = t.to_account_id " +
             "WHERE t.occurred_at >= :start AND t.occurred_at < :end " +
             "ORDER BY t.occurred_at DESC, t.id DESC"
     )
@@ -155,20 +179,22 @@ interface TransactionDao {
 
     @Query(
         "SELECT t.id AS id, t.amount_cents AS amountCents, t.kind AS kind, " +
-            "t.account_id AS accountId, t.category_id AS categoryId, t.note AS note, " +
+            "t.account_id AS accountId, t.to_account_id AS toAccountId, t.fee_cents AS feeCents, " +
+            "t.category_id AS categoryId, t.note AS note, " +
             "t.occurred_at AS occurredAt, t.exclude_from_stats AS excludeFromStats, " +
-            "c.name AS categoryName, " +
-            "COALESCE(p.icon_key, c.icon_key) AS categoryIcon, " +
-            "COALESCE(p.color_hex, c.color_hex) AS categoryColor, " +
-            "a.name AS accountName " +
+            "COALESCE(c.name, '') AS categoryName, " +
+            "COALESCE(p.icon_key, c.icon_key, 'more') AS categoryIcon, " +
+            "COALESCE(p.color_hex, c.color_hex, '#FF607D8B') AS categoryColor, " +
+            "a.name AS accountName, COALESCE(ta.name, '') AS toAccountName " +
             "FROM transactions t " +
-            "JOIN categories c ON c.id = t.category_id " +
+            "LEFT JOIN categories c ON c.id = t.category_id " +
             "LEFT JOIN categories p ON p.id = c.parent_id " +
             "JOIN accounts a ON a.id = t.account_id " +
+            "LEFT JOIN accounts ta ON ta.id = t.to_account_id " +
             "WHERE t.occurred_at >= :start AND t.occurred_at < :end " +
             "AND (:keyword = '' OR t.note LIKE '%' || :keyword || '%' OR c.name LIKE '%' || :keyword || '%') " +
             "AND (:categoryId IS NULL OR t.category_id = :categoryId) " +
-            "AND (:accountId IS NULL OR t.account_id = :accountId) " +
+            "AND (:accountId IS NULL OR t.account_id = :accountId OR t.to_account_id = :accountId) " +
             "AND (:kind IS NULL OR t.kind = :kind) " +
             "AND t.amount_cents >= :minCents " +
             "AND (:maxCents IS NULL OR t.amount_cents <= :maxCents) " +

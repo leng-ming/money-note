@@ -1,7 +1,9 @@
 package com.local.moneynote.ui.screens
 
+import android.Manifest
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -72,6 +74,7 @@ import com.local.moneynote.data.AccountType
 import com.local.moneynote.data.CategoryEntity
 import com.local.moneynote.data.TxKind
 import com.local.moneynote.notify.PaymentNotificationListener
+import com.local.moneynote.notify.PendingPayment
 import com.local.moneynote.ui.AccountStyles
 import com.local.moneynote.ui.CatIcons
 import com.local.moneynote.ui.components.SectionCard
@@ -112,24 +115,43 @@ fun SettingsScreen(
     var pendingImportUri by remember { mutableStateOf<Uri?>(null) }
     var showImportConfirm by remember { mutableStateOf(false) }
 
-    // 自动记账是否已授权。授权是在系统设置里做的，用户点完返回时状态会变，
-    // 所以监听 ON_RESUME 重新查一次，否则界面会一直显示「未开启」。
+    // 自动记账的两个授权状态。授权都在系统里做，用户点完返回时才会变，
+    // 所以监听 ON_RESUME 重新查一次，否则界面会一直停在旧状态。
     var notifyGranted by remember {
         mutableStateOf(PaymentNotificationListener.isGranted(context))
     }
+    // 「发通知」是另一个独立权限（Android 13+ 要运行时申请）。
+    // 少了它，监听服务照样识别，但提醒发不出去 —— 现象就是「一次都没触发」。
+    var canNotify by remember {
+        mutableStateOf(PaymentNotificationListener.canPostNotifications(context))
+    }
+
+    fun toast(msg: String) {
+        Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+    }
+
+    val notifyPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        canNotify = granted
+        if (granted) {
+            toast("通知权限已开启，接着去授权「通知使用权」")
+            context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+        } else {
+            toast("没有通知权限，识别到支付也没法提醒你")
+        }
+    }
+
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 notifyGranted = PaymentNotificationListener.isGranted(context)
+                canNotify = PaymentNotificationListener.canPostNotifications(context)
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
-    }
-
-    fun toast(msg: String) {
-        Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
     }
 
     val exportJsonLauncher = rememberLauncherForActivityResult(
@@ -266,25 +288,48 @@ fun SettingsScreen(
             }
         }
 
-        // ---------- 数据 ----------
         // ---------- 自动记账 ----------
         item {
             SectionCard(title = "自动记账") {
+                // 这条链路要两个授权，缺任何一个都表现为「毫无反应」，
+                // 所以状态分开显示，别让用户猜卡在哪一步
+                val allReady = notifyGranted && canNotify
                 ManageRow(
                     icon = Icons.Filled.NotificationsActive,
-                    iconColor = if (notifyGranted) BrandGreen else TextSecondary,
-                    title = if (notifyGranted) "已开启" else "去开启自动记账",
-                    subtitle = if (notifyGranted) {
-                        "微信 / 支付宝付款后会提醒你，点一下就能记好"
-                    } else {
-                        "需要授权「通知使用权」，只读取微信和支付宝的支付通知"
+                    iconColor = if (allReady) BrandGreen else TextSecondary,
+                    title = when {
+                        !notifyGranted -> "去开启自动记账"
+                        !canNotify -> "还差一步：允许发送通知"
+                        else -> "已开启"
+                    },
+                    subtitle = when {
+                        !notifyGranted ->
+                            "需要授权「通知使用权」，只读取微信和支付宝的支付通知"
+                        !canNotify ->
+                            "识别到了也得有通知权限才能提醒你，点这里授权"
+                        else ->
+                            "微信 / 支付宝付款后会提醒你，点一下就能记好"
                     },
                     onClick = {
-                        context.startActivity(
-                            Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
-                        )
+                        if (!canNotify && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                            notifyPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                        } else {
+                            context.startActivity(
+                                Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
+                            )
+                        }
                     }
                 )
+
+                // 链路自检：能收到这条，说明权限和通知渠道都没问题
+                ManageRow(
+                    icon = Icons.Filled.NotificationsActive,
+                    iconColor = TextSecondary,
+                    title = "发一条测试提醒",
+                    subtitle = "收得到，就说明自动记账的提醒能正常工作",
+                    onClick = { PendingPayment.postTest(context) }
+                )
+
                 Text(
                     "只解析通知里的金额，不做任何上传。App 依旧没有网络权限，" +
                         "数据不会离开这台手机。",

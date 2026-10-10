@@ -1,11 +1,15 @@
 package com.local.moneynote.notify
 
+import android.Manifest
 import android.app.Notification
 import android.content.ComponentName
 import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Build
 import android.provider.Settings
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
+import androidx.core.content.ContextCompat
 
 /**
  * 盯着微信 / 支付宝的支付通知。
@@ -66,6 +70,21 @@ class PaymentNotificationListener : NotificationListenerService() {
             val me = ComponentName(context, PaymentNotificationListener::class.java)
             // 这个字段是「包名/类名:包名/类名」的冒号分隔串
             return enabled.split(':').any { ComponentName.unflattenFromString(it) == me }
+        }
+
+        /**
+         * App 有没有「发通知」的权限。
+         *
+         * Android 13 起这是运行时权限，必须在代码里主动申请 —— 少了它，
+         * 监听服务照样能识别到支付，但**提醒根本发不出去**，
+         * 用户看到的现象就是「自动记账一次都没触发」（真实踩过的坑）。
+         */
+        fun canPostNotifications(context: Context): Boolean {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return true
+            return ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.POST_NOTIFICATIONS
+            ) == PackageManager.PERMISSION_GRANTED
         }
     }
 }

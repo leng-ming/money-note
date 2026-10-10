@@ -150,13 +150,17 @@ class MoneyRepository(private val db: AppDatabase) {
     suspend fun lastAccountId(): Long? = transactions.lastAccountId()
 
     suspend fun addTransaction(
-        amountCents: Long, kind: TxKind, accountId: Long, categoryId: Long,
-        note: String, occurredAt: Long, excludeFromStats: Boolean = false
+        amountCents: Long, kind: TxKind, accountId: Long, categoryId: Long?,
+        note: String, occurredAt: Long, excludeFromStats: Boolean = false,
+        // 仅转账用：转入账户与手续费。实际到账 = amountCents - feeCents
+        toAccountId: Long? = null, feeCents: Long = 0L
     ): Long = transactions.insert(
         TransactionEntity(
             amountCents = amountCents,
             kind = kind,
             accountId = accountId,
+            toAccountId = if (kind == TxKind.TRANSFER) toAccountId else null,
+            feeCents = if (kind == TxKind.TRANSFER) feeCents.coerceAtLeast(0L) else 0L,
             categoryId = categoryId,
             note = note.trim(),
             occurredAt = occurredAt,
