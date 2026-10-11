@@ -10,6 +10,7 @@ import android.provider.Settings
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import androidx.core.content.ContextCompat
+import com.local.moneynote.core.Money
 
 /**
  * 盯着微信 / 支付宝的支付通知。
@@ -44,11 +45,66 @@ class PaymentNotificationListener : NotificationListenerService() {
             .filter { it.isNotBlank() }
             .joinToString(" ")
 
-        val parsed = PaymentParser.parse(pkg, title, body) ?: return
+        val parsed = PaymentParser.parse(pkg, title, body)
+
+        // 先留档再判断 —— 「收到了但没认出来」同样要留下痕迹，
+        // 否则排查时根本分不清是没收到通知、还是规则没匹配上
+        Diagnostics.record(
+            this,
+            Diagnostics.Entry(
+                at = System.currentTimeMillis(),
+                pkg = pkg,
+                title = title,
+                body = body,
+                result = if (parsed == null) {
+                    "未匹配"
+                } else {
+                    val action = if (parsed.isIncome) "收入" else "支出"
+                    "已识别：$action ¥" + Money.format(parsed.amountCents)
+                }
+            )
+        )
+
+        if (parsed == null) return
         if (isDuplicate(parsed)) return
 
         PendingPayment.save(this, parsed)
         PendingPayment.post(this, parsed)
+    }
+
+    /**
+     * 服务真正被系统绑上时走这里。
+     *
+     * 记一笔很有价值：如果诊断里只有「已连接」、却从来没有支付通知，
+     * 说明绑定是好的、问题在通知本身；如果连「已连接」都没有，
+     * 那就是系统压根没绑上（Android 在 App 升级后经常这样）。
+     */
+    override fun onListenerConnected() {
+        super.onListenerConnected()
+        Diagnostics.record(
+            this,
+            Diagnostics.Entry(
+                at = System.currentTimeMillis(),
+                pkg = "system",
+                title = "监听服务已连接",
+                body = "",
+                result = "服务就绪"
+            )
+        )
+    }
+
+    override fun onListenerDisconnected() {
+        super.onListenerDisconnected()
+        Diagnostics.record(
+            this,
+            Diagnostics.Entry(
+                at = System.currentTimeMillis(),
+                pkg = "system",
+                title = "监听服务被系统断开",
+                body = "",
+                result = "需要重新绑定"
+            )
+        )
     }
 
     private fun isDuplicate(parsed: PaymentParser.Parsed): Boolean {
@@ -70,6 +126,20 @@ class PaymentNotificationListener : NotificationListenerService() {
             val me = ComponentName(context, PaymentNotificationListener::class.java)
             // 这个字段是「包名/类名:包名/类名」的冒号分隔串
             return enabled.split(':').any { ComponentName.unflattenFromString(it) == me }
+        }
+
+        /**
+         * 主动请求系统重新绑定监听服务。
+         *
+         * Android 会在 App 升级、系统省电等情况下把它解绑，解绑之后
+         * onNotificationPosted 再也不会被调用 —— 但设置里的「通知使用权」
+         * 依然显示已授权。从用户视角看就是「权限明明给了却毫无反应」。
+         * requestRebind 能把绑定要回来，这是这个问题的正解。
+         */
+        fun requestRebind(context: Context) {
+            if (!isGranted(context)) return
+            val me = ComponentName(context, PaymentNotificationListener::class.java)
+            runCatching { requestRebind(me) }
         }
 
         /**

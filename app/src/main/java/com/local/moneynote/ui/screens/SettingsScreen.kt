@@ -31,6 +31,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FileDownload
@@ -42,6 +43,7 @@ import androidx.compose.material.icons.filled.TableChart
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -73,6 +75,7 @@ import com.local.moneynote.data.AccountEntity
 import com.local.moneynote.data.AccountType
 import com.local.moneynote.data.CategoryEntity
 import com.local.moneynote.data.TxKind
+import com.local.moneynote.notify.Diagnostics
 import com.local.moneynote.notify.PaymentNotificationListener
 import com.local.moneynote.notify.PendingPayment
 import com.local.moneynote.ui.AccountStyles
@@ -88,6 +91,9 @@ import com.local.moneynote.ui.theme.TextSecondary
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import kotlinx.coroutines.withContext
 import java.time.LocalDate
 
@@ -114,6 +120,8 @@ fun SettingsScreen(
     var showCategoryEditor by remember { mutableStateOf(false) }
     var pendingImportUri by remember { mutableStateOf<Uri?>(null) }
     var showImportConfirm by remember { mutableStateOf(false) }
+    // 自动记账的诊断记录
+    var showDiagnostics by remember { mutableStateOf(false) }
 
     // 自动记账的两个授权状态。授权都在系统里做，用户点完返回时才会变，
     // 所以监听 ON_RESUME 重新查一次，否则界面会一直停在旧状态。
@@ -330,6 +338,15 @@ fun SettingsScreen(
                     onClick = { PendingPayment.postTest(context) }
                 )
 
+                // 诊断：把最近收到的支付通知原样列出来，一眼看出卡在哪一步
+                ManageRow(
+                    icon = Icons.Filled.BugReport,
+                    iconColor = TextSecondary,
+                    title = "诊断记录",
+                    subtitle = "看看最近收到了哪些支付通知、有没有认出来",
+                    onClick = { showDiagnostics = true }
+                )
+
                 Text(
                     "只解析通知里的金额，不做任何上传。App 依旧没有网络权限，" +
                         "数据不会离开这台手机。",
@@ -535,9 +552,97 @@ fun SettingsScreen(
             }
         )
     }
+
+    if (showDiagnostics) {
+        DiagnosticsDialog(
+            context = context,
+            onDismiss = { showDiagnostics = false }
+        )
+    }
 }
 
 /* ------------------------------------------------------------------ */
+
+/**
+ * 自动记账诊断。
+ *
+ * 这条链路跨了微信 → 系统通知 → 本 App 三段，任何一段断了，
+ * 用户看到的都是同一句「什么都没发生」。把收到的每条相关通知和解析结果
+ * 原样列出来，才能分出到底是「通知没收到」还是「收到了但没认出来」。
+ */
+@Composable
+private fun DiagnosticsDialog(
+    context: android.content.Context,
+    onDismiss: () -> Unit
+) {
+    var entries by remember { mutableStateOf(Diagnostics.read(context)) }
+    val timeFormat = remember { SimpleDateFormat("MM-dd HH:mm:ss", Locale.getDefault()) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("自动记账诊断") },
+        text = {
+            if (entries.isEmpty()) {
+                Text(
+                    "还没有任何记录。\n\n" +
+                        "如果你刚付过款这里还是空的，说明系统没把通知送给本 App —— " +
+                        "去系统设置的「通知使用权」里把本 App 关掉再打开一次，" +
+                        "然后重新打开本 App。",
+                    style = MaterialTheme.typography.bodySmall
+                )
+            } else {
+                Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                    entries.forEach { e ->
+                        Column(modifier = Modifier.padding(vertical = 7.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    Diagnostics.sourceName(e.pkg),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Spacer(Modifier.weight(1f))
+                                Text(
+                                    timeFormat.format(Date(e.at)),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = TextSecondary
+                                )
+                            }
+                            Text(
+                                e.result,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = if (e.result.startsWith("已识别")) {
+                                    BrandGreen
+                                } else if (e.result == "未匹配") {
+                                    ExpenseRed
+                                } else {
+                                    TextSecondary
+                                }
+                            )
+                            if (e.title.isNotBlank() || e.body.isNotBlank()) {
+                                Spacer(Modifier.height(2.dp))
+                                Text(
+                                    "标题：${e.title}\n正文：${e.body}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = TextSecondary
+                                )
+                            }
+                        }
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                Diagnostics.clear(context)
+                entries = emptyList()
+            }) { Text("清空") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("关闭") }
+        }
+    )
+}
 /*  通用行                                                             */
 /* ------------------------------------------------------------------ */
 

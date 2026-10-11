@@ -43,6 +43,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.local.moneynote.notify.PaymentNotificationListener
 import com.local.moneynote.notify.PendingPayment
 import com.local.moneynote.ui.screens.AccountDetailScreen
 import com.local.moneynote.ui.screens.AccountEditorDialog
@@ -96,6 +97,13 @@ private fun AppRoot(intentTick: StateFlow<Int>) {
     val context = LocalContext.current
     val activity = context as? Activity
     val tick by intentTick.collectAsState()
+
+    // 每次启动都主动把监听服务要回来。
+    // Android 在 App 升级之后会解绑它，而设置里的「通知使用权」仍显示已授权，
+    // 不重新绑定的话服务再也收不到通知 —— 用户看到的就是「权限明明开了却毫无反应」。
+    LaunchedEffect(Unit) {
+        PaymentNotificationListener.requestRebind(context)
+    }
 
     // 从「微信 支出 ¥12.00，点一下记下来」那条通知点进来时，
     // 把暂存的支付信息读出来，直接跳记账页并填好金额。

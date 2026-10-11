@@ -186,7 +186,7 @@ app/src/main/java/com/local/moneynote/
 ## 八、App 信息
 
 - 包名：`com.local.moneynote`
-- 版本：**1.8**（versionCode 9）
+- 版本：**1.9**（versionCode 10）
 - 最低支持：Android 8.0（API 26）
 - 目标版本：Android 15（API 35）
 - 权限：**没有网络、存储、定位权限**（导出文件走系统文件选择器）
@@ -194,6 +194,21 @@ app/src/main/java/com/local/moneynote/
     不开启的话 App 功能完全不受影响，账目数据也**不会离开这台手机**。
 
 ### 版本历史
+
+**v1.9** —— 修「自动记账还是没触发」：
+
+- **病根找到了**：`dumpsys notification` 显示 App 的监听服务**不在
+  「Live notification listeners」列表里** —— 两项权限都给了，但**系统没有绑定服务**，
+  于是 `onNotificationPosted` 永远不会被调用。
+  对比 v1.7 时的诊断，那时服务是绑着的，说明是 **App 升级之后被系统解绑了**
+- **修法**：App 每次启动调一次 `NotificationListenerService.requestRebind()`，
+  主动把绑定要回来。安装后验证：服务立刻回到 Live 列表 ✓
+- **加了「行车记录仪」**（`notify/Diagnostics.kt`）：把最近 30 条**相关通知的原始文案
+  和解析结果**都留档。之前代码一行日志都没有，解析失败直接 `return`，
+  根本分不清是「通知没收到」还是「收到了但没认出来」
+  - 服务的连接 / 断开也会记一笔，能一眼看出系统有没有绑上
+- 设置页新增「**诊断记录**」入口：列出每条通知的来源、时间、标题正文，
+  以及结论是「已识别：支出 ¥12.00」还是「未匹配」
 
 **v1.8** —— 第九轮反馈：
 
