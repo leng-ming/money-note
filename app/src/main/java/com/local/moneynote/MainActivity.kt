@@ -26,6 +26,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -37,6 +38,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -103,6 +107,20 @@ private fun AppRoot(intentTick: StateFlow<Int>) {
     // 不重新绑定的话服务再也收不到通知 —— 用户看到的就是「权限明明开了却毫无反应」。
     LaunchedEffect(Unit) {
         PaymentNotificationListener.requestRebind(context)
+    }
+
+    // 每次回到前台也重绑一次。
+    // 小米这类系统会在 App 退到后台一段时间后悄悄解绑，只靠冷启动那一次不够保险；
+    // 重绑是幂等的，多调几次没有副作用。
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                PaymentNotificationListener.requestRebind(context)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     // 从「微信 支出 ¥12.00，点一下记下来」那条通知点进来时，
