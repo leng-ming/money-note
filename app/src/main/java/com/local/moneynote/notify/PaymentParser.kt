@@ -29,14 +29,30 @@ object PaymentParser {
         Regex("""(\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?)\s*元""")
     )
 
-    /** 必须命中其中之一，否则不认 —— 免得把聊天消息、广告也当成账单 */
+    /**
+     * 必须命中其中之一，否则不认 —— 免得把聊天消息、广告也当成账单。
+     *
+     * 「支出」「交易」是照着支付宝真实通知补的：
+     * 标题「交易提醒」、正文「你有一笔24.84元的支出」——
+     * 里面一个"支付"字都没有，当初就被漏掉了。
+     */
     private val PAY_HINTS = listOf(
-        "支付", "付款", "已付", "收款", "到账", "消费", "扣款", "转账"
+        "支付", "付款", "已付", "收款", "到账", "消费", "扣款", "转账",
+        "支出", "交易",
+        // 「收钱」不能漏：抹掉标题里的「支付宝」之后，
+        // 「已收钱 30.00元」这类正文就一个关键词都没有了
+        "收钱"
     )
 
-    /** 命中这些词就直接放掉：这些不是一笔新支出 */
+    /**
+     * 命中这些词就直接放掉：这些**确定不是一笔新支出**。
+     *
+     * ⚠️ 千万不要把「立减」「优惠」放进来。支付宝真实的支付通知就长这样：
+     *     「你有一笔24.84元的支出，领立减1.08元权益。」
+     * 把它们当排除条件，等于把真实账目全过滤掉 —— 这是踩过的坑。
+     */
     private val SKIP_HINTS = listOf(
-        "退款", "红包", "优惠", "立减", "积分", "账单提醒", "余额提醒"
+        "退款", "账单提醒", "余额提醒"
     )
 
     private const val WECHAT = "com.tencent.mm"
@@ -57,7 +73,15 @@ object PaymentParser {
     fun parse(packageName: String, title: String, body: String): Parsed? {
         if (packageName !in WATCHED_PACKAGES) return null
 
-        val text = "$title $body"
+        // 「支付宝」这个 App 名里本身就含「支付」二字。
+        // 如果标题就是 App 名，光靠标题就能命中 PAY_HINTS，
+        // 连「你有 3 元优惠券即将过期」这种都会被当成账单。
+        // 所以匹配前先把标题里的品牌名抹掉。
+        // （「微信」「微信支付」不用特殊处理：它们不含歧义词，而且
+        //   「微信支付」作为标题时本来就该被认出来）
+        val cleanTitle = title.replace("支付宝", "")
+        val text = "$cleanTitle $body"
+
         if (PAY_HINTS.none { text.contains(it) }) return null
         if (SKIP_HINTS.any { text.contains(it) }) return null
 

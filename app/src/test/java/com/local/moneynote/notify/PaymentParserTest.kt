@@ -94,6 +94,41 @@ class PaymentParserTest {
         assertNull(PaymentParser.parse(alipay, "支付宝", "你有 3 元优惠券即将过期"))
     }
 
+    /* ---------------- 真实通知样本（用户实测抓到的）---------------- */
+
+    /**
+     * 支付宝的真实支付通知。
+     *
+     * 这条当初被漏掉了，两个原因叠在一起：
+     * 1. 标题「交易提醒」、正文「…的支出」，一个"支付"字都没有，PAY_HINTS 全落空
+     * 2. 正文里有「立减」，而当时的 SKIP_HINTS 把它当成了"这不是支付"的标志
+     *
+     * 所以这里同时锁住两件事：能认出来、且金额取的是 24.84 而不是立减的 1.08。
+     */
+    @Test
+    fun `支付宝 交易提醒 带立减权益`() {
+        val r = PaymentParser.parse(
+            alipay,
+            "交易提醒",
+            "你有一笔24.84元的支出，领立减1.08元权益。"
+        )
+        assertEquals(2484L, r?.amountCents)
+        assertEquals("支付宝", r?.source)
+        assertFalse(r!!.isIncome)
+    }
+
+    @Test
+    fun `支付宝能量通知不算账`() {
+        assertNull(
+            PaymentParser.parse(alipay, "你的10克能量快成熟了", "别被好友摘走了哦！【订阅】")
+        )
+    }
+
+    @Test
+    fun `微信视频通话不算账`() {
+        assertNull(PaymentParser.parse(wechat, "妈", "视频通话中"))
+    }
+
     @Test
     fun `其他 App 的通知一律不看`() {
         assertNull(PaymentParser.parse("com.other.app", "支付", "已支付 ¥10.00"))

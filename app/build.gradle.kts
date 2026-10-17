@@ -13,8 +13,10 @@ android {
         applicationId = "com.local.moneynote"
         minSdk = 26
         targetSdk = 35
-        versionCode = 10
-        versionName = "1.9"
+        // 纯修复版：功能版本号不动，加日期后缀；versionCode 仍必须递增，
+        // 否则 Android 会以 INSTALL_FAILED_VERSION_DOWNGRADE 拒绝安装
+        versionCode = 11
+        versionName = "1.9-261017.1"
         vectorDrawables { useSupportLibrary = true }
     }
 
