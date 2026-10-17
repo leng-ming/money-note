@@ -50,6 +50,7 @@ import com.local.moneynote.data.TransactionRow
 import com.local.moneynote.data.TxKind
 import com.local.moneynote.ui.components.AccountBalanceList
 import com.local.moneynote.ui.components.AccountLine
+import com.local.moneynote.ui.components.EmptyHint
 import com.local.moneynote.ui.components.HOME_CARD_HEIGHT
 import com.local.moneynote.ui.components.HOME_PAGE_ASSETS
 import com.local.moneynote.ui.components.HOME_PAGE_BUDGET
@@ -99,6 +100,9 @@ fun TransactionListScreen(
     val accounts by vm.accounts.collectAsState()
     val netByAccount by vm.netByAccount.collectAsState()
     val allCategories by vm.allCategories.collectAsState()
+    // 预算卡下方要显示的本月分类排行
+    val monthCats by vm.monthExpenseByCategory.collectAsState()
+    val monthExpense by vm.monthExpense.collectAsState()
 
     var deleteTarget by remember { mutableStateOf<TransactionRow?>(null) }
     // 预算卡右上角「编辑」打开的对话框
@@ -176,7 +180,7 @@ fun TransactionListScreen(
             modifier = Modifier.padding(top = 5.dp, bottom = 2.dp)
         )
 
-        // 滑到「总资产」那一页时，下面改显示账户余额；滑回收支/预算再换回账单明细。
+        // 滑到「总资产」那一页时，下面改显示账户余额；滑回收支页再换回账单明细。
         // 这里用 settledPage 而不是 currentPage —— 后者滑到一半就会变，下方内容会中途跳一下。
         if (pagerState.settledPage == HOME_PAGE_ASSETS) {
             AccountBalanceList(
@@ -189,6 +193,35 @@ fun TransactionListScreen(
                 },
                 onAccountClick = onOpenAccount
             )
+            return@Column
+        }
+
+        // 停在「预算」那一页时，下面显示本月的分类排行 ——
+        // 预算关心的是「钱花在哪些类目上」，账单流水反而次要。
+        // 用当月的汇总（而不是跟随年/日粒度），这样才能和预算卡的口径对上。
+        if (pagerState.settledPage == HOME_PAGE_BUDGET) {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(
+                    start = 12.dp, end = 12.dp, top = 4.dp, bottom = 100.dp
+                )
+            ) {
+                if (monthCats.isEmpty()) {
+                    item { EmptyHint("这个月还没有支出") }
+                } else {
+                    item {
+                        Text(
+                            "本月分类排行",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(start = 4.dp, top = 6.dp, bottom = 4.dp)
+                        )
+                    }
+                    items(monthCats, key = { it.categoryId }) { c ->
+                        CategoryRankRow(item = c, total = monthExpense)
+                    }
+                }
+            }
             return@Column
         }
 

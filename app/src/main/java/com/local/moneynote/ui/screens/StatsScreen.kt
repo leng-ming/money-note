@@ -312,7 +312,7 @@ private fun androidx.compose.foundation.layout.RowScope.ToggleCell(
 }
 
 @Composable
-private fun CategoryRankRow(item: CategorySum, total: Long) {
+fun CategoryRankRow(item: CategorySum, total: Long) {
     val color = parseHexColor(item.colorHex)
     val ratio = if (total > 0) item.totalCents.toFloat() / total else 0f
     val pct = ratio * 100f

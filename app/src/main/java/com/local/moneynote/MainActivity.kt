@@ -5,6 +5,14 @@ import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -137,7 +145,19 @@ private fun AppRoot(intentTick: StateFlow<Int>) {
         }
     }
 
-    NavHost(navController = nav, startDestination = "main") {
+    NavHost(
+        navController = nav,
+        startDestination = "main",
+        // 进出页面：新页面从右侧轻滑入 + 淡入，返回时反向，比硬切自然
+        enterTransition = {
+            slideInHorizontally(tween(260)) { it / 6 } + fadeIn(tween(200))
+        },
+        exitTransition = { fadeOut(tween(150)) },
+        popEnterTransition = { fadeIn(tween(200)) },
+        popExitTransition = {
+            slideOutHorizontally(tween(240)) { it / 6 } + fadeOut(tween(180))
+        }
+    ) {
 
         composable("main") {
             MainScaffold(
@@ -279,17 +299,28 @@ private fun MainScaffold(
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
-            when (tab) {
-                0 -> TransactionListScreen(
-                    vm = vm,
-                    onEdit = onEdit,
-                    onSearch = onSearch,
-                    onOpenAccount = onOpenAccount,
-                    onAssetsPageChanged = { assetsPageActive = it }
-                )
-                1 -> StatsScreen(vm = vm)
-                2 -> BudgetScreen(vm = vm, onOpenRecurring = onOpenRecurring)
-                else -> SettingsScreen(vm = vm, onOpenRecurring = onOpenRecurring)
+            // 底部标签切换做个淡入 + 轻微上滑，比硬切柔和。
+            // 位移只有 1/28 屏，够"有感觉"又不会晃眼。
+            AnimatedContent(
+                targetState = tab,
+                transitionSpec = {
+                    (fadeIn(tween(220)) + slideInVertically(tween(220)) { it / 28 })
+                        .togetherWith(fadeOut(tween(160)))
+                },
+                label = "tab"
+            ) { current ->
+                when (current) {
+                    0 -> TransactionListScreen(
+                        vm = vm,
+                        onEdit = onEdit,
+                        onSearch = onSearch,
+                        onOpenAccount = onOpenAccount,
+                        onAssetsPageChanged = { assetsPageActive = it }
+                    )
+                    1 -> StatsScreen(vm = vm)
+                    2 -> BudgetScreen(vm = vm, onOpenRecurring = onOpenRecurring)
+                    else -> SettingsScreen(vm = vm, onOpenRecurring = onOpenRecurring)
+                }
             }
         }
     }
