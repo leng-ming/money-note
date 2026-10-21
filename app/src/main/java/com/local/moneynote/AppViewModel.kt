@@ -161,9 +161,26 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         .flatMapLatest { r -> repo.observeSumByCategory(TxKind.EXPENSE, r.first, r.last + 1) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT), emptyList())
 
+    /**
+     * 同上，但**不把二级分类归并到一级**。
+     *
+     * 分类排行要展开二级明细时用这份数据：归并版里根本不存在二级分类的 key，
+     * 想看「购物里数码花了多少」就只能靠它。一级的金额仍以归并版为准，
+     * 两者在 core/[com.local.moneynote.core.subCategorySlices] 里合起来用。
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val expenseByExactCategory: StateFlow<List<CategorySum>> = periodRange
+        .flatMapLatest { r -> repo.observeSumByExactCategory(TxKind.EXPENSE, r.first, r.last + 1) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT), emptyList())
+
     @OptIn(ExperimentalCoroutinesApi::class)
     val incomeByCategory: StateFlow<List<CategorySum>> = periodRange
         .flatMapLatest { r -> repo.observeSumByCategory(TxKind.INCOME, r.first, r.last + 1) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT), emptyList())
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val incomeByExactCategory: StateFlow<List<CategorySum>> = periodRange
+        .flatMapLatest { r -> repo.observeSumByExactCategory(TxKind.INCOME, r.first, r.last + 1) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT), emptyList())
 
     /** 月视图的每日趋势 */

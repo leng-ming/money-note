@@ -45,6 +45,8 @@ import com.local.moneynote.AppViewModel
 import com.local.moneynote.Granularity
 import com.local.moneynote.core.Dates
 import com.local.moneynote.core.Money
+import com.local.moneynote.core.hasSubSlices
+import com.local.moneynote.core.subCategorySlices
 import com.local.moneynote.data.BudgetPeriod
 import com.local.moneynote.data.TransactionRow
 import com.local.moneynote.data.TxKind
@@ -102,7 +104,10 @@ fun TransactionListScreen(
     val allCategories by vm.allCategories.collectAsState()
     // 预算卡下方要显示的本月分类排行
     val monthCats by vm.monthExpenseByCategory.collectAsState()
+    // 同一份数据的「不归并」版本，用来展开二级细分
+    val monthExactCats by vm.monthExpenseByExactCategory.collectAsState()
     val monthExpense by vm.monthExpense.collectAsState()
+    var expandedTopCat by remember { mutableStateOf<Long?>(null) }
 
     var deleteTarget by remember { mutableStateOf<TransactionRow?>(null) }
     // 预算卡右上角「编辑」打开的对话框
@@ -218,7 +223,24 @@ fun TransactionListScreen(
                         )
                     }
                     items(monthCats, key = { it.categoryId }) { c ->
-                        CategoryRankRow(item = c, total = monthExpense)
+                        val expandable = hasSubSlices(c, allCategories, monthExactCats)
+                        val expanded = expandable && expandedTopCat == c.categoryId
+                        CategoryRankRow(
+                            item = c,
+                            total = monthExpense,
+                            expandable = expandable,
+                            expanded = expanded,
+                            onClick = if (expandable) {
+                                { expandedTopCat = if (expanded) null else c.categoryId }
+                            } else {
+                                null
+                            }
+                        )
+                        if (expanded) {
+                            subCategorySlices(c, allCategories, monthExactCats).forEach { s ->
+                                SubCategoryRankRow(item = s, total = monthExpense)
+                            }
+                        }
                     }
                 }
             }

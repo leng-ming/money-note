@@ -18,12 +18,16 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -34,11 +38,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.local.moneynote.AppViewModel
 import com.local.moneynote.Granularity
 import com.local.moneynote.core.Dates
 import com.local.moneynote.core.Money
+import com.local.moneynote.core.hasSubSlices
+import com.local.moneynote.core.subCategorySlices
 import com.local.moneynote.data.CategorySum
 import com.local.moneynote.ui.CatIcons
 import com.local.moneynote.ui.components.ChartSlice
@@ -67,14 +75,25 @@ fun StatsScreen(vm: AppViewModel) {
     val income by vm.periodIncome.collectAsState()
     val expenseCats by vm.expenseByCategory.collectAsState()
     val incomeCats by vm.incomeByCategory.collectAsState()
+    val expenseExact by vm.expenseByExactCategory.collectAsState()
+    val incomeExact by vm.incomeByExactCategory.collectAsState()
+    val categories by vm.allCategories.collectAsState()
     val byDay by vm.expenseByDay.collectAsState()
     val byMonth by vm.expenseByMonth.collectAsState()
 
     var showIncome by remember { mutableStateOf(false) }
 
+    // 展开着细分的那个一级分类
+    var expandedTop by remember { mutableStateOf<Long?>(null) }
+
     val cats: List<CategorySum> = if (showIncome) incomeCats else expenseCats
+    val exactCats: List<CategorySum> = if (showIncome) incomeExact else expenseExact
     val total: Long = if (showIncome) income else expense
     val daysInMonth = Dates.daysInMonth(year, month)
+
+    // 支出/收入切换后，同一个 id 指向的是另一套分类，旧的展开状态会对不上，收起来。
+    // 换周期不清空：同一个分类在新周期里还有支出的话，保持展开反而顺手。
+    LaunchedEffect(showIncome) { expandedTop = null }
 
     val slices = remember(cats) {
         cats.map { ChartSlice(it.name, it.totalCents, parseHexColor(it.colorHex)) }
@@ -209,7 +228,24 @@ fun StatsScreen(vm: AppViewModel) {
                 )
             }
             items(cats, key = { it.categoryId }) { c ->
-                CategoryRankRow(item = c, total = total)
+                val expandable = hasSubSlices(c, categories, exactCats)
+                val expanded = expandable && expandedTop == c.categoryId
+                CategoryRankRow(
+                    item = c,
+                    total = total,
+                    expandable = expandable,
+                    expanded = expanded,
+                    onClick = if (expandable) {
+                        { expandedTop = if (expanded) null else c.categoryId }
+                    } else {
+                        null
+                    }
+                )
+                if (expanded) {
+                    subCategorySlices(c, categories, exactCats).forEach { s ->
+                        SubCategoryRankRow(item = s, total = total)
+                    }
+                }
             }
         }
     }
@@ -311,8 +347,21 @@ private fun androidx.compose.foundation.layout.RowScope.ToggleCell(
     }
 }
 
+/**
+ * 分类排行的一行。
+ *
+ * @param expandable 这个分类底下有二级细分可看（有的话名字后面出现一个箭头）
+ * @param expanded   细分是否已展开
+ * @param onClick    点击回调；为 null 时整行不可点
+ */
 @Composable
-fun CategoryRankRow(item: CategorySum, total: Long) {
+fun CategoryRankRow(
+    item: CategorySum,
+    total: Long,
+    expandable: Boolean = false,
+    expanded: Boolean = false,
+    onClick: (() -> Unit)? = null
+) {
     val color = parseHexColor(item.colorHex)
     val ratio = if (total > 0) item.totalCents.toFloat() / total else 0f
     val pct = ratio * 100f
@@ -320,7 +369,9 @@ fun CategoryRankRow(item: CategorySum, total: Long) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 3.dp),
+            .padding(horizontal = 12.dp, vertical = 3.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(enabled = onClick != null) { onClick?.invoke() },
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(containerColor = CardBg),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
@@ -348,12 +399,32 @@ fun CategoryRankRow(item: CategorySum, total: Long) {
             Spacer(Modifier.width(11.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        item.name,
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.Medium,
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.weight(1f)
-                    )
+                    ) {
+                        Text(
+                            item.name,
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false)
+                        )
+                        if (expandable) {
+                            Spacer(Modifier.width(2.dp))
+                            Icon(
+                                imageVector = if (expanded) {
+                                    Icons.Filled.KeyboardArrowUp
+                                } else {
+                                    Icons.Filled.KeyboardArrowDown
+                                },
+                                contentDescription = if (expanded) "收起细分" else "展开细分",
+                                tint = TextSecondary,
+                                modifier = Modifier.size(15.dp)
+                            )
+                        }
+                    }
                     Text(
                         "¥" + Money.format(item.totalCents),
                         style = MaterialTheme.typography.bodyMedium,
@@ -379,5 +450,58 @@ fun CategoryRankRow(item: CategorySum, total: Long) {
                 }
             }
         }
+    }
+}
+
+/**
+ * 展开后的一条二级细分。
+ *
+ * 刻意做得比一级行轻：没有卡片、没有圆形图标、字更小 ——
+ * 它是「一级行的注释」，视觉上要从属而不是并列。
+ *
+ * 占比同样是相对**整个周期的总支出**算的，所以同一批细分加起来正好等于上面那个一级的占比，
+ * 换成「占大类多少」反而要多做一次心算。
+ */
+@Composable
+fun SubCategoryRankRow(item: CategorySum, total: Long) {
+    val color = parseHexColor(item.colorHex)
+    val ratio = if (total > 0) item.totalCents.toFloat() / total else 0f
+    val pct = ratio * 100f
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 58.dp, end = 26.dp, top = 2.dp, bottom = 2.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .size(5.dp)
+                .clip(CircleShape)
+                .background(color.copy(alpha = 0.65f))
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(
+            item.name,
+            style = MaterialTheme.typography.bodySmall,
+            color = TextSecondary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f)
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(
+            "¥" + Money.format(item.totalCents),
+            style = MaterialTheme.typography.labelMedium,
+            color = TextPrimary
+        )
+        Spacer(Modifier.width(10.dp))
+        Text(
+            "%.1f%%".format(pct),
+            style = MaterialTheme.typography.labelSmall,
+            color = TextSecondary,
+            modifier = Modifier.width(42.dp),
+            textAlign = TextAlign.End
+        )
     }
 }
