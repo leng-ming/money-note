@@ -193,7 +193,8 @@ interface TransactionDao {
             "LEFT JOIN accounts ta ON ta.id = t.to_account_id " +
             "WHERE t.occurred_at >= :start AND t.occurred_at < :end " +
             "AND (:keyword = '' OR t.note LIKE '%' || :keyword || '%' OR c.name LIKE '%' || :keyword || '%') " +
-            "AND (:categoryId IS NULL OR t.category_id = :categoryId) " +
+            "AND (:categoryId IS NULL OR t.category_id = :categoryId " +
+            "OR t.category_id IN (SELECT id FROM categories WHERE parent_id = :categoryId)) " +
             "AND (:accountId IS NULL OR t.account_id = :accountId OR t.to_account_id = :accountId) " +
             "AND (:kind IS NULL OR t.kind = :kind) " +
             "AND t.amount_cents >= :minCents " +

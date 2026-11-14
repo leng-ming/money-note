@@ -58,6 +58,7 @@ object Backup {
         put("id", c.id)
         put("name", c.name)
         put("kind", c.kind.name)
+        put("parentId", c.parentId ?: JSONObject.NULL)
         put("iconKey", c.iconKey)
         put("colorHex", c.colorHex)
         put("sortOrder", c.sortOrder)
@@ -121,6 +122,10 @@ object Backup {
     /** 解析失败会抛异常，调用方负责捕获并提示用户 */
     fun fromJson(text: String): BackupPayload {
         val root = JSONObject(text)
+        val version = root.optInt("version", 1)
+        require(version in 1..VERSION) {
+            "不支持的备份版本：$version"
+        }
         return BackupPayload(
             accounts = root.optJSONArray("accounts").mapObjects { o ->
                 AccountEntity(
@@ -139,6 +144,8 @@ object Backup {
                     id = o.getLong("id"),
                     name = o.getString("name"),
                     kind = runCatching { TxKind.valueOf(o.getString("kind")) }.getOrDefault(TxKind.EXPENSE),
+                    // v2 之前没有 parentId，缺失时按一级分类处理
+                    parentId = if (o.isNull("parentId")) null else o.getLong("parentId"),
                     iconKey = o.optString("iconKey", "more"),
                     colorHex = o.optString("colorHex", "#FF607D8B"),
                     sortOrder = o.optInt("sortOrder", 0),
@@ -209,8 +216,13 @@ object Backup {
         if (this == null) return emptyList()
         val out = ArrayList<T>(length())
         for (i in 0 until length()) {
-            val o = optJSONObject(i) ?: continue
-            runCatching { transform(o) }.getOrNull()?.let { out.add(it) }
+            val o = optJSONObject(i)
+                ?: throw IllegalArgumentException("备份数组第 ${i + 1} 项不是对象")
+            try {
+                out.add(transform(o))
+            } catch (e: Exception) {
+                throw IllegalArgumentException("备份数组第 ${i + 1} 项数据无效", e)
+            }
         }
         return out
     }

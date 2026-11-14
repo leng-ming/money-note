@@ -235,9 +235,9 @@ fun AccountDetailScreen(
             onDelete = {
                 showEditor = false
                 scope.launch {
-                    val count = vm.repo.accountTxCount(account.id)
+                    val count = vm.repo.accountReferenceCount(account.id)
                     if (count > 0) {
-                        Toast.makeText(context, "该账户下还有 $count 笔账，不能删除", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, "该账户仍被 $count 笔账单/周期规则使用，不能删除", Toast.LENGTH_SHORT).show()
                     } else {
                         vm.repo.deleteAccount(account)
                         Toast.makeText(context, "已删除", Toast.LENGTH_SHORT).show()

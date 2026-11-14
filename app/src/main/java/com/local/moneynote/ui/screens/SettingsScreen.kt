@@ -438,9 +438,9 @@ fun SettingsScreen(
                 showAccountEditor = false
                 if (editing != null) {
                     scope.launch {
-                        val count = vm.repo.accountTxCount(editing.id)
+                        val count = vm.repo.accountReferenceCount(editing.id)
                         if (count > 0) {
-                            toast("该账户下还有 $count 笔账，不能删除")
+                            toast("该账户仍被 $count 笔账单/周期规则使用，不能删除")
                         } else {
                             vm.repo.deleteAccount(editing)
                             toast("已删除")
@@ -475,9 +475,9 @@ fun SettingsScreen(
                 showCategoryEditor = false
                 if (editing != null) {
                     scope.launch {
-                        val count = vm.repo.categoryTxCount(editing.id)
+                        val count = vm.repo.categoryReferenceCount(editing.id)
                         if (count > 0) {
-                            toast("该分类下还有 $count 笔账，不能删除")
+                            toast("该分类或其子分类仍被 $count 笔账单/周期规则使用，不能删除")
                         } else {
                             // 连带清掉它下面的二级细分，免得留下孤儿行
                             categories.filter { it.parentId == editing.id }
@@ -498,9 +498,9 @@ fun SettingsScreen(
             },
             onDeleteChild = { child ->
                 scope.launch {
-                    val count = vm.repo.categoryTxCount(child.id)
+                    val count = vm.repo.categoryReferenceCount(child.id)
                     if (count > 0) {
-                        toast("「${child.name}」下还有 $count 笔账，不能删除")
+                        toast("「${child.name}」仍被 $count 笔账单/周期规则使用，不能删除")
                     } else {
                         vm.repo.deleteCategory(child)
                     }

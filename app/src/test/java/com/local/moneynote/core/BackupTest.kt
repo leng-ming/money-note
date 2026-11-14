@@ -44,6 +44,11 @@ class BackupTest {
                 colorHex = "#FFEF6C00", sortOrder = 0, archived = false, isSystem = true
             ),
             CategoryEntity(
+                id = 3L, name = "午餐", kind = TxKind.EXPENSE, parentId = 1L,
+                iconKey = "food", colorHex = "#FFEF6C00", sortOrder = 0,
+                archived = false, isSystem = true
+            ),
+            CategoryEntity(
                 id = 2L, name = "工资", kind = TxKind.INCOME, iconKey = "salary",
                 colorHex = "#FF2E7D32", sortOrder = 1, archived = false, isSystem = true
             )
@@ -127,6 +132,23 @@ class BackupTest {
     fun `周期账单的 null 上次生成时间能正确往返`() {
         val restored = Backup.fromJson(Backup.toJson(samplePayload))
         assertNull(restored.recurring.first().lastGeneratedAt)
+    }
+
+    @Test
+    fun `二级分类的父子关系能正确往返`() {
+        val restored = Backup.fromJson(Backup.toJson(samplePayload))
+        assertEquals(1L, restored.categories.first { it.id == 3L }.parentId)
+    }
+
+    @Test
+    fun `不支持的备份版本会明确失败`() {
+        val json = Backup.toJson(samplePayload).replace("\"version\": 1", "\"version\": 999")
+        try {
+            Backup.fromJson(json)
+            throw AssertionError("应该拒绝未知备份版本")
+        } catch (e: IllegalArgumentException) {
+            assertTrue(e.message.orEmpty().contains("备份版本"))
+        }
     }
 
     @Test

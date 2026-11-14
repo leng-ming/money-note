@@ -1,5 +1,6 @@
 package com.local.moneynote.data
 
+import androidx.room.withTransaction
 import com.local.moneynote.core.Dates
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -50,6 +51,9 @@ class MoneyRepository(private val db: AppDatabase) {
     suspend fun updateAccount(e: AccountEntity) = accounts.update(e)
     suspend fun accountById(id: Long) = accounts.byId(id)
     suspend fun accountTxCount(id: Long) = accounts.txCount(id)
+    /** 账户被历史账单或周期规则引用时不能物理删除。 */
+    suspend fun accountReferenceCount(id: Long): Int =
+        accounts.txCount(id) + recurring.allOnce().count { it.accountId == id }
     suspend fun deleteAccount(e: AccountEntity) = accounts.delete(e)
 
     /* ---------------- 分类 ---------------- */
@@ -71,6 +75,19 @@ class MoneyRepository(private val db: AppDatabase) {
     suspend fun updateCategory(e: CategoryEntity) = categories.update(e)
     suspend fun categoryById(id: Long) = categories.byId(id)
     suspend fun categoryTxCount(id: Long) = categories.txCount(id)
+    /** 检查父分类整棵子树及周期账单引用，避免删除后留下孤儿账单。 */
+    suspend fun categoryReferenceCount(id: Long): Int {
+        val all = categories.allOnce()
+        val ids = mutableSetOf(id)
+        var changed: Boolean
+        do {
+            changed = all.any { it.parentId in ids && ids.add(it.id) }
+        } while (changed)
+
+        val transactionRefs = ids.sumOf { categories.txCount(it) }
+        val recurringRefs = recurring.allOnce().count { it.categoryId in ids }
+        return transactionRefs + recurringRefs
+    }
     suspend fun deleteCategory(e: CategoryEntity) = categories.delete(e)
 
     /** 在某个一级分类下新增二级细分；kind 与图标配色都继承父分类 */
@@ -252,7 +269,7 @@ class MoneyRepository(private val db: AppDatabase) {
      * 把所有已到期的周期规则补记成真实账单。
      * guard 用来防止某条规则的 nextOccurAt 因数据异常停留在远古时间而陷入死循环。
      */
-    suspend fun materializeDueRecurring(now: Long = System.currentTimeMillis()): Int {
+    suspend fun materializeDueRecurring(now: Long = System.currentTimeMillis()): Int = db.withTransaction {
         var created = 0
         for (rule in recurring.due(now)) {
             var next = rule.nextOccurAt
@@ -276,19 +293,21 @@ class MoneyRepository(private val db: AppDatabase) {
             }
             recurring.update(rule.copy(nextOccurAt = next, lastGeneratedAt = last))
         }
-        return created
+        created
     }
 
     /* ---------------- 备份 ---------------- */
 
-    suspend fun snapshotForBackup(): BackupPayload = BackupPayload(
-        accounts = accounts.allOnce(),
-        categories = categories.allOnce(),
-        transactions = transactions.all(),
-        budgets = budgets.allOnce(),
-        recurring = recurring.allOnce(),
-        budgetCarryovers = carryovers.allOnce()
-    )
+    suspend fun snapshotForBackup(): BackupPayload = db.withTransaction {
+        BackupPayload(
+            accounts = accounts.allOnce(),
+            categories = categories.allOnce(),
+            transactions = transactions.all(),
+            budgets = budgets.allOnce(),
+            recurring = recurring.allOnce(),
+            budgetCarryovers = carryovers.allOnce()
+        )
+    }
 
     /**
      * 清空全部数据。
@@ -303,13 +322,15 @@ class MoneyRepository(private val db: AppDatabase) {
 
     /** 用备份内容整体替换本地数据（导入恢复） */
     suspend fun restoreFrom(payload: BackupPayload) = withContext(Dispatchers.IO) {
-        // clearAllTables 必须在 IO 线程；清空后按原 id 回填，保持账单与账户/分类的引用关系
-        db.clearAllTables()
-        payload.accounts.forEach { accounts.insert(it) }
-        payload.categories.forEach { categories.insert(it) }
-        payload.transactions.forEach { transactions.insert(it) }
-        payload.budgets.forEach { budgets.insert(it) }
-        payload.recurring.forEach { recurring.insert(it) }
-        payload.budgetCarryovers.forEach { carryovers.insert(it) }
+        db.withTransaction {
+            // 清空与回填必须在同一个事务里，失败时自动回滚到恢复前的数据。
+            db.clearAllTables()
+            payload.accounts.forEach { accounts.insert(it) }
+            payload.categories.forEach { categories.insert(it) }
+            payload.transactions.forEach { transactions.insert(it) }
+            payload.budgets.forEach { budgets.insert(it) }
+            payload.recurring.forEach { recurring.insert(it) }
+            payload.budgetCarryovers.forEach { carryovers.insert(it) }
+        }
     }
 }
