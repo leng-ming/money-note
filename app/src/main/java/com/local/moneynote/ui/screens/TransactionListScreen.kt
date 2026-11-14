@@ -399,8 +399,15 @@ private fun PeriodSummaryCard(expense: Long, income: Long, title: String) {
 /** 分组头：年视图按月分组、月视图按日分组，显示该组小计 */
 @Composable
 private fun GroupHeader(title: String, rows: List<TransactionRow>) {
-    val groupExpense = rows.filter { it.kind == TxKind.EXPENSE }.sumOf { it.amountCents }
-    val groupIncome = rows.filter { it.kind == TxKind.INCOME }.sumOf { it.amountCents }
+    // 必须排除 excludeFromStats 的流水（借还、押金这类「钱动了但不算消费」的账）：
+    // 数据库里所有统计查询都排除它们，这里要是照算，各日小计加起来就会比顶部月度合计大
+    // —— 用户看到的是一张自相矛盾的账单。
+    val groupExpense = rows
+        .filter { it.kind == TxKind.EXPENSE && !it.excludeFromStats }
+        .sumOf { it.amountCents }
+    val groupIncome = rows
+        .filter { it.kind == TxKind.INCOME && !it.excludeFromStats }
+        .sumOf { it.amountCents }
 
     Row(
         modifier = Modifier

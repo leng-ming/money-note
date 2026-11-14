@@ -404,6 +404,28 @@ class MoneyRepository(private val db: AppDatabase) {
         }
 
     /**
+     * 撤销最近一次收回/还款。
+     *
+     * 记错金额时的补救办法：撤掉最后一笔结算，金额退回去，再按正确数字重记。
+     * 只允许撤最后一笔 —— 从中间随便撤一笔，"已还多少"就跟流水对不上了。
+     *
+     * @return 撤销掉的金额；没有可撤的（只剩最开始那笔本金）时返回 0
+     */
+    suspend fun undoLastSettle(loanId: Long): Long = db.withTransaction {
+        val loan = loans.byId(loanId) ?: return@withTransaction 0L
+        val rows = transactions.byLoan(loanId)
+        // 第一笔永远是创建记录时记的本金流水，它不代表"还款"，撤了账就乱了
+        if (rows.size <= 1) return@withTransaction 0L
+
+        val last = rows.last()
+        transactions.delete(last)
+        loans.update(
+            loan.copy(settledCents = (loan.settledCents - last.amountCents).coerceAtLeast(0L))
+        )
+        last.amountCents
+    }
+
+    /**
      * 删除一条借还记录，连带撤掉它产生的全部流水。
      *
      * 不连带撤的话会出现「记录没了、可账户里那笔钱还是少的」——

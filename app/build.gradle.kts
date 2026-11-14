@@ -15,8 +15,8 @@ android {
         targetSdk = 35
         // 功能版本（有新增能力）走整数次版本号；纯修复才加日期后缀。
         // 不论哪种，versionCode 都必须递增，否则 Android 会拒绝安装
-        versionCode = 14
-        versionName = "2.2"
+        versionCode = 15
+        versionName = "2.3"
         vectorDrawables { useSupportLibrary = true }
     }
 

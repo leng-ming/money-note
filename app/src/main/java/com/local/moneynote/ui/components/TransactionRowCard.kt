@@ -15,6 +15,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.SwapHoriz
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
@@ -88,10 +89,11 @@ fun TransactionRowCard(
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
-                    imageVector = if (isTransfer) {
-                        Icons.Filled.SwapHoriz
-                    } else {
-                        CatIcons.of(row.categoryIcon)
+                    imageVector = when {
+                        isTransfer -> Icons.Filled.SwapHoriz
+                        // 借还、押金这类账：钱确实动了，但不算消费，用闭眼图标区分开
+                        row.excludeFromStats -> Icons.Filled.VisibilityOff
+                        else -> CatIcons.of(row.categoryIcon)
                     },
                     contentDescription = null,
                     tint = catColor,
@@ -137,7 +139,11 @@ fun TransactionRowCard(
                 // 转账的标题里已经有账户了，这里就不再重复
                 if (!isTransfer) {
                     Text(
-                        row.accountName,
+                        if (row.excludeFromStats) {
+                            row.accountName + " · 不计入统计"
+                        } else {
+                            row.accountName
+                        },
                         style = MaterialTheme.typography.labelSmall,
                         color = TextSecondary
                     )

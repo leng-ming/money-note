@@ -272,6 +272,10 @@ interface TransactionDao {
     )
     fun observeSpent(categoryId: Long?, start: Long, end: Long): Flow<Long>
 
+    /** 某条借还记录产生的全部流水，按插入顺序（第一笔就是本金） */
+    @Query("SELECT * FROM transactions WHERE loan_id = :loanId ORDER BY id ASC")
+    suspend fun byLoan(loanId: Long): List<TransactionEntity>
+
     @Query("DELETE FROM transactions WHERE loan_id = :loanId")
     suspend fun deleteByLoanId(loanId: Long)
 

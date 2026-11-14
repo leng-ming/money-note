@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -106,6 +107,8 @@ fun LoanScreen(vm: AppViewModel, onBack: () -> Unit) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    // Android 15 起强制 edge-to-edge，不加这个顶栏会钻到状态栏底下
+                    .statusBarsPadding()
                     .padding(horizontal = 8.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -205,6 +208,18 @@ fun LoanScreen(vm: AppViewModel, onBack: () -> Unit) {
                         "已记录 ${Money.format(actual)}"
                     } else {
                         "没有可结算的金额"
+                    }
+                    android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
+                }
+            },
+            onUndo = {
+                actionTarget = null
+                scope.launch {
+                    val undone = vm.repo.undoLastSettle(target.id)
+                    val msg = if (undone > 0L) {
+                        "已撤销 ${Money.format(undone)}，可以重新记"
+                    } else {
+                        "没有可撤销的还款"
                     }
                     android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
                 }
@@ -616,8 +631,11 @@ private fun HorizontalAccountChips(
 /**
  * 点某一条借还记录时弹出的操作面板。
  *
- * 未结清时可以直接填「这次收回多少」——支持部分还款，
- * 因为现实里大多是先还一部分。输入框默认填满剩余金额，一次点击就能结清。
+ * 这个对话框要回答两个问题：
+ * 1. **这次到底记多少？** 支持只还一部分 —— 现实里大多也是先还一点。
+ *    输入框默认填满剩余金额（一次结清最省事），但「一半 / 全部」快捷键
+ *    和下面那行实时回显会明确告诉你：改成任意金额都行。
+ * 2. **记错了怎么办？** 可以撤销最近一次结算，不用把整条记录删掉重来。
  */
 @Composable
 private fun LoanActionDialog(
@@ -625,12 +643,16 @@ private fun LoanActionDialog(
     accountName: String,
     onDismiss: () -> Unit,
     onSettle: (Long) -> Unit,
+    onUndo: () -> Unit,
     onDelete: () -> Unit
 ) {
     val lent = loan.direction == LoanDirection.LENT
+    val verb = if (lent) "收回" else "还款"
     var amountText by remember(loan.id) { mutableStateOf(Money.formatPlain(loan.openCents)) }
     var confirmDelete by remember { mutableStateOf(false) }
     val cents = Money.parseToCents(amountText) ?: 0L
+    val remainAfter = (loan.openCents - cents).coerceAtLeast(0L)
+    val willSettle = cents > 0L && cents >= loan.openCents
 
     if (confirmDelete) {
         AlertDialog(
@@ -661,7 +683,7 @@ private fun LoanActionDialog(
             Column {
                 Text(
                     "本金 ¥" + Money.format(loan.amountCents) +
-                        "　已" + (if (lent) "收回" else "还") + " ¥" + Money.format(loan.settledCents),
+                        "　已" + verb + " ¥" + Money.format(loan.settledCents),
                     style = MaterialTheme.typography.bodySmall,
                     color = TextSecondary
                 )
@@ -682,26 +704,47 @@ private fun LoanActionDialog(
                     Spacer(Modifier.height(6.dp))
                     Text(
                         "还欠 ¥" + Money.format(loan.openCents),
-                        style = MaterialTheme.typography.bodyMedium,
+                        style = MaterialTheme.typography.bodyLarge,
                         fontWeight = FontWeight.SemiBold,
                         color = TextPrimary
                     )
-                    Spacer(Modifier.height(10.dp))
+                    Spacer(Modifier.height(8.dp))
                     OutlinedTextField(
                         value = amountText,
                         onValueChange = { amountText = it },
-                        label = { Text(if (lent) "这次收回多少" else "这次还多少") },
+                        label = { Text("这次" + verb + "多少（可以只还一部分）") },
                         prefix = { Text("¥") },
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                         modifier = Modifier.fillMaxWidth()
                     )
-                    Spacer(Modifier.height(6.dp))
+                    Spacer(Modifier.height(8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        QuickAmount("一半") {
+                            amountText = Money.formatPlain(loan.openCents / 2)
+                        }
+                        QuickAmount("全部（结清）") {
+                            amountText = Money.formatPlain(loan.openCents)
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
                     Text(
-                        "可以只填一部分，剩下的下次再记",
+                        when {
+                            cents <= 0L -> "填多少就记多少，剩下的下次接着记"
+                            willSettle -> "这次记 ¥" + Money.format(cents) + "，这笔就结清了"
+                            else -> "这次记 ¥" + Money.format(cents) +
+                                "，之后还剩 ¥" + Money.format(remainAfter)
+                        },
                         style = MaterialTheme.typography.labelSmall,
-                        color = TextSecondary
+                        color = if (willSettle) BrandGreen else TextSecondary
                     )
+                }
+                // 记错了的补救：撤掉最近一笔，金额退回去，再按正确数字重记
+                if (loan.settledCents > 0L) {
+                    Spacer(Modifier.height(8.dp))
+                    TextButton(onClick = onUndo, contentPadding = PaddingValues(0.dp)) {
+                        Text("撤销最近一次" + verb)
+                    }
                 }
                 if (loan.note.isNotBlank()) {
                     Spacer(Modifier.height(8.dp))
@@ -723,7 +766,7 @@ private fun LoanActionDialog(
         confirmButton = {
             if (!loan.isSettled) {
                 TextButton(enabled = cents > 0L, onClick = { onSettle(cents) }) {
-                    Text(if (lent) "记一笔收回" else "记一笔还款")
+                    Text(if (cents > 0L) "记一笔 ¥" + Money.format(cents) else "记一笔" + verb)
                 }
             }
         },
@@ -731,4 +774,22 @@ private fun LoanActionDialog(
             TextButton(onClick = onDismiss) { Text("关闭") }
         }
     )
+}
+
+/** 结算金额的快捷填法：一半、全部 */
+@Composable
+private fun QuickAmount(text: String, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.10f))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 6.dp)
+    ) {
+        Text(
+            text,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.primary
+        )
+    }
 }
