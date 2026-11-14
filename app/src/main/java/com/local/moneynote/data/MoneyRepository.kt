@@ -2,6 +2,9 @@ package com.local.moneynote.data
 
 import androidx.room.withTransaction
 import com.local.moneynote.core.Dates
+import com.local.moneynote.core.loanNote
+import com.local.moneynote.core.loanSettleNote
+import com.local.moneynote.core.settleAmount
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
@@ -14,7 +17,9 @@ data class BackupPayload(
     val budgets: List<BudgetEntity>,
     val recurring: List<RecurringEntity>,
     /** 给默认值，这样 v1.1 之前导出的老备份文件仍然能正常解析 */
-    val budgetCarryovers: List<BudgetCarryoverEntity> = emptyList()
+    val budgetCarryovers: List<BudgetCarryoverEntity> = emptyList(),
+    /** 备份格式 v2 才有借还记录；老备份里缺这一段，当成没有即可 */
+    val loans: List<LoanEntity> = emptyList()
 )
 
 /**
@@ -29,6 +34,7 @@ class MoneyRepository(private val db: AppDatabase) {
     private val budgets = db.budgetDao()
     private val recurring = db.recurringDao()
     private val carryovers = db.budgetCarryoverDao()
+    private val loans = db.loanDao()
 
     /* ---------------- 账户 ---------------- */
 
@@ -75,19 +81,43 @@ class MoneyRepository(private val db: AppDatabase) {
     suspend fun updateCategory(e: CategoryEntity) = categories.update(e)
     suspend fun categoryById(id: Long) = categories.byId(id)
     suspend fun categoryTxCount(id: Long) = categories.txCount(id)
+    /** 收集一个分类及其全部后代的 id（含自身）。眼下最多两级，但按通用写法处理，将来加层级不用改这里。 */
+    private fun subtreeIds(rootId: Long, all: List<CategoryEntity>): Set<Long> {
+        val ids = mutableSetOf(rootId)
+        var added = true
+        while (added) {
+            added = false
+            all.forEach { if (it.parentId in ids && ids.add(it.id)) added = true }
+        }
+        return ids
+    }
+
     /** 检查父分类整棵子树及周期账单引用，避免删除后留下孤儿账单。 */
     suspend fun categoryReferenceCount(id: Long): Int {
-        val all = categories.allOnce()
-        val ids = mutableSetOf(id)
-        var changed: Boolean
-        do {
-            changed = all.any { it.parentId in ids && ids.add(it.id) }
-        } while (changed)
-
+        val ids = subtreeIds(id, categories.allOnce())
         val transactionRefs = ids.sumOf { categories.txCount(it) }
         val recurringRefs = recurring.allOnce().count { it.categoryId in ids }
         return transactionRefs + recurringRefs
     }
+
+    /**
+     * 删除一个分类及其整棵子树，并连带清掉挂在这些分类上的预算与预算转结。
+     *
+     * 引用检查只看账单和周期规则，但那两样之外还有预算：
+     * 预算行存的是 category_id，分类删了它就指向一个不存在的分类 ——
+     * 预算页查不到名字，表现出来的就是一行空白。所以这里必须连带动手。
+     * 整个过程放在一个事务里，避免删到一半留下半棵树。
+     */
+    suspend fun deleteCategoryTree(rootId: Long) = db.withTransaction {
+        val all = categories.allOnce()
+        val ids = subtreeIds(rootId, all)
+        budgets.allOnce().filter { it.categoryId?.let(ids::contains) == true }
+            .forEach { budgets.delete(it) }
+        carryovers.allOnce().filter { it.categoryId?.let(ids::contains) == true }
+            .forEach { carryovers.delete(it) }
+        all.filter { it.id in ids }.forEach { categories.delete(it) }
+    }
+
     suspend fun deleteCategory(e: CategoryEntity) = categories.delete(e)
 
     /** 在某个一级分类下新增二级细分；kind 与图标配色都继承父分类 */
@@ -296,6 +326,94 @@ class MoneyRepository(private val db: AppDatabase) {
         created
     }
 
+    /* ---------------- 借还 ---------------- */
+
+    fun observeLoans(): Flow<List<LoanEntity>> = loans.observeAll()
+
+    /**
+     * 新增一条借还记录，并生成对应的真实流水。
+     *
+     * 两件事必须在同一个事务里：只插记录不插流水，账面上钱没动（余额就错了）；
+     * 只插流水不插记录，就成了一笔「莫名其妙的大额支出」，将来也不知道该找谁要。
+     */
+    suspend fun addLoan(
+        direction: LoanDirection,
+        person: String,
+        amountCents: Long,
+        accountId: Long,
+        occurredAt: Long,
+        dueAt: Long? = null,
+        note: String = ""
+    ): Long = db.withTransaction {
+        val cleanPerson = person.trim()
+        val id = loans.insert(
+            LoanEntity(
+                direction = direction,
+                person = cleanPerson,
+                amountCents = amountCents,
+                accountId = accountId,
+                occurredAt = occurredAt,
+                dueAt = dueAt,
+                note = note.trim()
+            )
+        )
+        transactions.insert(
+            TransactionEntity(
+                amountCents = amountCents,
+                // 借出 = 我的钱出去了；借入 = 我的钱进来了
+                kind = if (direction == LoanDirection.LENT) TxKind.EXPENSE else TxKind.INCOME,
+                accountId = accountId,
+                categoryId = null,
+                note = loanNote(direction, cleanPerson),
+                occurredAt = occurredAt,
+                // 关键：既不算收入也不算支出。否则一笔「借出去、将来还回来」的钱
+                // 会把当月支出顶高、让预算当场爆掉，可它根本不是消费。
+                excludeFromStats = true,
+                loanId = id
+            )
+        )
+        id
+    }
+
+    /**
+     * 收回欠款 / 还掉欠账，按实际结算金额生成一笔流水。支持部分结算。
+     *
+     * @return 实际结算了多少（已夹到未还上限）；记录不存在或金额为 0 时返回 0
+     */
+    suspend fun settleLoan(loanId: Long, requestedCents: Long, occurredAt: Long): Long =
+        db.withTransaction {
+            val loan = loans.byId(loanId) ?: return@withTransaction 0L
+            val actual = settleAmount(loan, requestedCents)
+            if (actual <= 0L) return@withTransaction 0L
+
+            loans.update(loan.copy(settledCents = loan.settledCents + actual))
+            transactions.insert(
+                TransactionEntity(
+                    amountCents = actual,
+                    // 别人还我钱 = 我进账；我还别人钱 = 我出账
+                    kind = if (loan.direction == LoanDirection.LENT) TxKind.INCOME else TxKind.EXPENSE,
+                    accountId = loan.accountId,
+                    categoryId = null,
+                    note = loanSettleNote(loan.direction, loan.person),
+                    occurredAt = occurredAt,
+                    excludeFromStats = true,
+                    loanId = loan.id
+                )
+            )
+            actual
+        }
+
+    /**
+     * 删除一条借还记录，连带撤掉它产生的全部流水。
+     *
+     * 不连带撤的话会出现「记录没了、可账户里那笔钱还是少的」——
+     * 用户删掉记录，期望的是这件事当作没发生过。
+     */
+    suspend fun deleteLoan(loanId: Long) = db.withTransaction {
+        transactions.deleteByLoanId(loanId)
+        loans.byId(loanId)?.let { loans.delete(it) }
+    }
+
     /* ---------------- 备份 ---------------- */
 
     suspend fun snapshotForBackup(): BackupPayload = db.withTransaction {
@@ -305,7 +423,8 @@ class MoneyRepository(private val db: AppDatabase) {
             transactions = transactions.all(),
             budgets = budgets.allOnce(),
             recurring = recurring.allOnce(),
-            budgetCarryovers = carryovers.allOnce()
+            budgetCarryovers = carryovers.allOnce(),
+            loans = loans.allOnce()
         )
     }
 
@@ -327,6 +446,8 @@ class MoneyRepository(private val db: AppDatabase) {
             db.clearAllTables()
             payload.accounts.forEach { accounts.insert(it) }
             payload.categories.forEach { categories.insert(it) }
+            // 借还记录要在账单之前回填，账单的 loan_id 才有意义
+            payload.loans.forEach { loans.insert(it) }
             payload.transactions.forEach { transactions.insert(it) }
             payload.budgets.forEach { budgets.insert(it) }
             payload.recurring.forEach { recurring.insert(it) }

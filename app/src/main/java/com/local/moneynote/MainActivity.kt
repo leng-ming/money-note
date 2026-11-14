@@ -61,6 +61,7 @@ import com.local.moneynote.ui.screens.AccountDetailScreen
 import com.local.moneynote.ui.screens.AccountEditorDialog
 import com.local.moneynote.ui.screens.AddTransactionScreen
 import com.local.moneynote.ui.screens.BudgetScreen
+import com.local.moneynote.ui.screens.LoanScreen
 import com.local.moneynote.ui.screens.RecurringScreen
 import com.local.moneynote.ui.screens.SearchScreen
 import com.local.moneynote.ui.screens.SettingsScreen
@@ -166,7 +167,8 @@ private fun AppRoot(intentTick: StateFlow<Int>) {
                 onEdit = { id -> nav.navigate("edit?txId=$id") },
                 onSearch = { nav.navigate("search") },
                 onOpenRecurring = { nav.navigate("recurring") },
-                onOpenAccount = { id -> nav.navigate("account/$id") }
+                onOpenAccount = { id -> nav.navigate("account/$id") },
+                onOpenLoans = { nav.navigate("loans") }
             )
         }
 
@@ -219,6 +221,10 @@ private fun AppRoot(intentTick: StateFlow<Int>) {
         composable("recurring") {
             RecurringScreen(vm = vm, onBack = { nav.popBackStack() })
         }
+
+        composable("loans") {
+            LoanScreen(vm = vm, onBack = { nav.popBackStack() })
+        }
     }
 }
 
@@ -229,7 +235,8 @@ private fun MainScaffold(
     onEdit: (Long) -> Unit,
     onSearch: () -> Unit,
     onOpenRecurring: () -> Unit,
-    onOpenAccount: (Long) -> Unit
+    onOpenAccount: (Long) -> Unit,
+    onOpenLoans: () -> Unit
 ) {
     var tab by remember { mutableIntStateOf(0) }
     // 明细页滑到「总资产」那张卡时，右下角 FAB 要变成「添加账户」
@@ -319,7 +326,11 @@ private fun MainScaffold(
                     )
                     1 -> StatsScreen(vm = vm)
                     2 -> BudgetScreen(vm = vm, onOpenRecurring = onOpenRecurring)
-                    else -> SettingsScreen(vm = vm, onOpenRecurring = onOpenRecurring)
+                    else -> SettingsScreen(
+                        vm = vm,
+                        onOpenRecurring = onOpenRecurring,
+                        onOpenLoans = onOpenLoans
+                    )
                 }
             }
         }

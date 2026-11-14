@@ -272,6 +272,9 @@ interface TransactionDao {
     )
     fun observeSpent(categoryId: Long?, start: Long, end: Long): Flow<Long>
 
+    @Query("DELETE FROM transactions WHERE loan_id = :loanId")
+    suspend fun deleteByLoanId(loanId: Long)
+
     @Query("SELECT COUNT(*) FROM transactions")
     suspend fun countAll(): Int
 
@@ -402,4 +405,34 @@ interface BudgetCarryoverDao {
 
     @Delete
     suspend fun delete(e: BudgetCarryoverEntity)
+}
+
+/**
+ * 借还记录。
+ *
+ * 排序把「还没结清的」永远排前面，再按发生时间倒序 ——
+ * 打开这页最想看到的永远是「谁还欠我钱」，结清的那些只是留档。
+ */
+@Dao
+interface LoanDao {
+    @Query(
+        "SELECT * FROM loans ORDER BY (settled_cents >= amount_cents) ASC, " +
+            "occurred_at DESC, id DESC"
+    )
+    fun observeAll(): Flow<List<LoanEntity>>
+
+    @Query("SELECT * FROM loans ORDER BY (settled_cents >= amount_cents) ASC, occurred_at DESC, id DESC")
+    suspend fun allOnce(): List<LoanEntity>
+
+    @Query("SELECT * FROM loans WHERE id = :id")
+    suspend fun byId(id: Long): LoanEntity?
+
+    @Insert
+    suspend fun insert(e: LoanEntity): Long
+
+    @Update
+    suspend fun update(e: LoanEntity)
+
+    @Delete
+    suspend fun delete(e: LoanEntity)
 }

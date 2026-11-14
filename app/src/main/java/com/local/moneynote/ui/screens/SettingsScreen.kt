@@ -37,6 +37,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.GridOn
+import androidx.compose.material.icons.filled.Handshake
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.TableChart
@@ -106,7 +107,8 @@ private val PRESET_COLORS = listOf(
 @Composable
 fun SettingsScreen(
     vm: AppViewModel,
-    onOpenRecurring: () -> Unit
+    onOpenRecurring: () -> Unit,
+    onOpenLoans: () -> Unit
 ) {
     val allAccounts by vm.allAccounts.collectAsState()
     val netByAccount by vm.netByAccount.collectAsState()
@@ -358,6 +360,18 @@ fun SettingsScreen(
         }
 
         item {
+            SectionCard(title = "借还与往来") {
+                ManageRow(
+                    icon = Icons.Filled.Handshake,
+                    iconColor = BrandGreen,
+                    title = "借还记录",
+                    subtitle = "借给别人的、向别人借的钱，收回没有",
+                    onClick = onOpenLoans
+                )
+            }
+        }
+
+        item {
             SectionCard(title = "数据与备份") {
                 ManageRow(
                     icon = Icons.Filled.Repeat,
@@ -479,10 +493,8 @@ fun SettingsScreen(
                         if (count > 0) {
                             toast("该分类或其子分类仍被 $count 笔账单/周期规则使用，不能删除")
                         } else {
-                            // 连带清掉它下面的二级细分，免得留下孤儿行
-                            categories.filter { it.parentId == editing.id }
-                                .forEach { vm.repo.deleteCategory(it) }
-                            vm.repo.deleteCategory(editing)
+                            // 连带删掉整棵子树和挂在上面的预算，免得留下孤儿行
+                            vm.repo.deleteCategoryTree(editing.id)
                             toast("已删除")
                         }
                     }
@@ -502,7 +514,7 @@ fun SettingsScreen(
                     if (count > 0) {
                         toast("「${child.name}」仍被 $count 笔账单/周期规则使用，不能删除")
                     } else {
-                        vm.repo.deleteCategory(child)
+                        vm.repo.deleteCategoryTree(child.id)
                     }
                 }
             }

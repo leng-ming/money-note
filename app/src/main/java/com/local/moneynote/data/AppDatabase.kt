@@ -15,9 +15,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         TransactionEntity::class,
         BudgetEntity::class,
         RecurringEntity::class,
-        BudgetCarryoverEntity::class
+        BudgetCarryoverEntity::class,
+        LoanEntity::class
     ],
-    version = 4,
+    version = 5,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -29,6 +30,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun budgetDao(): BudgetDao
     abstract fun recurringDao(): RecurringDao
     abstract fun budgetCarryoverDao(): BudgetCarryoverDao
+    abstract fun loanDao(): LoanDao
 
     companion object {
         @Volatile
@@ -42,7 +44,7 @@ abstract class AppDatabase : RoomDatabase() {
                     "money_note.db"
                 )
                     .addCallback(SeedCallback)
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                     .build()
                     .also { INSTANCE = it }
             }
@@ -133,6 +135,34 @@ abstract class AppDatabase : RoomDatabase() {
                     "CREATE INDEX IF NOT EXISTS `index_transactions_account_id` " +
                         "ON `transactions` (`account_id`)"
                 )
+            }
+        }
+
+        /**
+         * v4 → v5：支持「借还」。
+         *
+         * 新建 loans 表，并给 transactions 加一列 loan_id（可空）——
+         * 借还产生的流水靠它回指记录，删除记录时才能连带撤掉。
+         *
+         * 纯增量：加表 + 加一列可空字段，老数据一条都不动。
+         * 列定义必须和 [LoanEntity] 完全一致，否则 Room 校验 schema 会抛异常。
+         */
+        private val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `loans` (" +
+                        "`id` INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT, " +
+                        "`direction` TEXT NOT NULL, " +
+                        "`person` TEXT NOT NULL, " +
+                        "`amount_cents` INTEGER NOT NULL, " +
+                        "`settled_cents` INTEGER NOT NULL, " +
+                        "`account_id` INTEGER NOT NULL, " +
+                        "`occurred_at` INTEGER NOT NULL, " +
+                        "`due_at` INTEGER, " +
+                        "`note` TEXT NOT NULL, " +
+                        "`created_at` INTEGER NOT NULL)"
+                )
+                db.execSQL("ALTER TABLE `transactions` ADD COLUMN `loan_id` INTEGER")
             }
         }
 

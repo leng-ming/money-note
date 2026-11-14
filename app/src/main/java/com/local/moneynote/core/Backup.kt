@@ -7,6 +7,8 @@ import com.local.moneynote.data.BudgetCarryoverEntity
 import com.local.moneynote.data.BudgetEntity
 import com.local.moneynote.data.BudgetPeriod
 import com.local.moneynote.data.CategoryEntity
+import com.local.moneynote.data.LoanDirection
+import com.local.moneynote.data.LoanEntity
 import com.local.moneynote.data.RecurFreq
 import com.local.moneynote.data.RecurringEntity
 import com.local.moneynote.data.TransactionEntity
@@ -23,7 +25,17 @@ import org.json.JSONObject
  */
 object Backup {
 
-    private const val VERSION = 1
+    /**
+     * 备份格式版本。
+     *
+     * - 1：最初的样子
+     * - 2：categories 补上 parentId（二级分类的父子关系），并新增 loans（借还记录）
+     *
+     * 读取时接受 `1..VERSION`：老备份照样能导入（缺的字段按默认值处理），
+     * 但文件里必须记着版本号，将来格式再变时才能判断「这份文件我认不认得」。
+     * 只加字段不升版本是个坏习惯 —— 事后没法区分「本来就没有这个字段」和「这份文件本该有」。
+     */
+    private const val VERSION = 2
 
     /* ---------------- 导出 ---------------- */
 
@@ -40,6 +52,7 @@ object Backup {
             "budgetCarryovers",
             JSONArray().also { arr -> payload.budgetCarryovers.forEach { arr.put(carryoverToJson(it)) } }
         )
+        root.put("loans", JSONArray().also { arr -> payload.loans.forEach { arr.put(loanToJson(it)) } })
         return root.toString(2)
     }
 
@@ -80,6 +93,7 @@ object Backup {
         put("createdAt", t.createdAt)
         put("updatedAt", t.updatedAt)
         put("excludeFromStats", t.excludeFromStats)
+        put("loanId", t.loanId ?: JSONObject.NULL)
     }
 
     private fun budgetToJson(b: BudgetEntity) = JSONObject().apply {
@@ -106,8 +120,7 @@ object Backup {
         put("enabled", r.enabled)
     }
 
-    private fun carryoverToJson(c: BudgetCarryoverEntity) = JSONObject().apply {
-        put("id", c.id)
+    private fun carryoverToJson(c: BudgetCarryoverEntity) = JSONObject().apply {        put("id", c.id)
         put("categoryId", c.categoryId ?: JSONObject.NULL)
         put("fromYear", c.fromYear)
         put("fromMonth", c.fromMonth)
@@ -115,6 +128,19 @@ object Backup {
         put("toMonth", c.toMonth)
         put("amountCents", c.amountCents)
         put("createdAt", c.createdAt)
+    }
+
+    private fun loanToJson(l: LoanEntity) = JSONObject().apply {
+        put("id", l.id)
+        put("direction", l.direction.name)
+        put("person", l.person)
+        put("amountCents", l.amountCents)
+        put("settledCents", l.settledCents)
+        put("accountId", l.accountId)
+        put("occurredAt", l.occurredAt)
+        put("dueAt", l.dueAt ?: JSONObject.NULL)
+        put("note", l.note)
+        put("createdAt", l.createdAt)
     }
 
     /* ---------------- 导入 ---------------- */
@@ -167,7 +193,9 @@ object Backup {
                     occurredAt = o.optLong("occurredAt", System.currentTimeMillis()),
                     createdAt = o.optLong("createdAt", System.currentTimeMillis()),
                     updatedAt = o.optLong("updatedAt", System.currentTimeMillis()),
-                    excludeFromStats = o.optBoolean("excludeFromStats", false)
+                    excludeFromStats = o.optBoolean("excludeFromStats", false),
+                    // v2 之前没有借还，缺这个字段就是普通账单
+                    loanId = if (o.isNull("loanId")) null else o.getLong("loanId")
                 )
             },
             budgets = root.optJSONArray("budgets").mapObjects { o ->
@@ -206,6 +234,22 @@ object Backup {
                     toYear = o.getInt("toYear"),
                     toMonth = o.getInt("toMonth"),
                     amountCents = o.getLong("amountCents"),
+                    createdAt = o.optLong("createdAt", System.currentTimeMillis())
+                )
+            },
+            // v2 才有这一段；老备份缺了它就是空列表，不会报错
+            loans = root.optJSONArray("loans").mapObjects { o ->
+                LoanEntity(
+                    id = o.getLong("id"),
+                    direction = runCatching { LoanDirection.valueOf(o.getString("direction")) }
+                        .getOrDefault(LoanDirection.LENT),
+                    person = o.optString("person", ""),
+                    amountCents = o.getLong("amountCents"),
+                    settledCents = o.optLong("settledCents", 0L),
+                    accountId = o.getLong("accountId"),
+                    occurredAt = o.optLong("occurredAt", System.currentTimeMillis()),
+                    dueAt = if (o.isNull("dueAt")) null else o.getLong("dueAt"),
+                    note = o.optString("note", ""),
                     createdAt = o.optLong("createdAt", System.currentTimeMillis())
                 )
             }

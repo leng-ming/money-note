@@ -4,12 +4,15 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.local.moneynote.core.Dates
+import com.local.moneynote.core.LoanTotals
+import com.local.moneynote.core.loanTotals
 import com.local.moneynote.data.AccountEntity
 import com.local.moneynote.data.AppDatabase
 import com.local.moneynote.data.BudgetEntity
 import com.local.moneynote.data.CategoryEntity
 import com.local.moneynote.data.CategorySum
 import com.local.moneynote.data.DaySum
+import com.local.moneynote.data.LoanEntity
 import com.local.moneynote.data.MoneyRepository
 import com.local.moneynote.data.MonthSum
 import com.local.moneynote.data.RecurringEntity
@@ -93,6 +96,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     val budgets: StateFlow<List<BudgetEntity>> = repo.observeBudgets()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT), emptyList())
+
+    /** 借还记录：未结清的在前 */
+    val loans: StateFlow<List<LoanEntity>> = repo.observeLoans()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT), emptyList())
+
+    /** 还剩多少应收/应付，列表页顶部那两个数字 */
+    val loanSummary: StateFlow<LoanTotals> = repo.observeLoans()
+        .map { loanTotals(it) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT), LoanTotals())
 
     val recurringRules: StateFlow<List<RecurringEntity>> = repo.observeRecurring()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT), emptyList())

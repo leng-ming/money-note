@@ -14,6 +14,14 @@ import androidx.room.TypeConverter
  */
 enum class TxKind { EXPENSE, INCOME, TRANSFER }
 
+/**
+ * 借还的方向。
+ *
+ * - LENT：我借给别人的钱 → 对我而言是**应收**（对方欠我）
+ * - BORROWED：我向别人借的钱 → 是**应付**（我欠对方）
+ */
+enum class LoanDirection { LENT, BORROWED }
+
 /** 账户类型 */
 enum class AccountType { CASH, WECHAT, ALIPAY, BANK, CREDIT, OTHER }
 
@@ -84,7 +92,14 @@ data class TransactionEntity(
     @ColumnInfo(name = "occurred_at") val occurredAt: Long,
     @ColumnInfo(name = "created_at") val createdAt: Long = System.currentTimeMillis(),
     @ColumnInfo(name = "updated_at") val updatedAt: Long = System.currentTimeMillis(),
-    @ColumnInfo(name = "exclude_from_stats") val excludeFromStats: Boolean = false
+    @ColumnInfo(name = "exclude_from_stats") val excludeFromStats: Boolean = false,
+    /**
+     * 这笔账单由哪条借还记录自动生成（指向 loans.id），普通账单为 null。
+     *
+     * 有了它才能做到：删除一条借还记录时，把它连带产生的那几笔流水一起撤掉。
+     * 否则删掉记录、流水还在，账户余额就跟"看起来什么都没有"的状态对不上了。
+     */
+    @ColumnInfo(name = "loan_id") val loanId: Long? = null
 )
 
 /** 预算。categoryId 为 null 表示「总预算」 */
@@ -117,6 +132,44 @@ data class BudgetCarryoverEntity(
     @ColumnInfo(name = "created_at") val createdAt: Long = System.currentTimeMillis()
 )
 
+/**
+ * 借还记录：我借出去的钱（应收），或我向别人借的钱（应付）。
+ *
+ * 为什么不直接记成一笔支出？
+ * 借给朋友 1000 块，钱确实离开了账户，但**它不是消费** ——
+ * 记成支出会让当月支出虚高、预算当场爆掉，可这笔钱将来还会回来。
+ *
+ * 所以一次「借出」同时做两件事：
+ * 1. 往账户记一笔真实流水 → 余额才是对的（借出的钱确实少了）
+ * 2. 把这笔流水标成 excludeFromStats → 不进收支统计、不吃预算
+ *
+ * 真正的业务状态（谁欠我、还了多少、还欠多少）存在这张表里。
+ * 金额恒为正，方向由 [direction] 决定。
+ */
+@Entity(tableName = "loans")
+data class LoanEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0L,
+    val direction: LoanDirection,
+    /** 对方是谁（朋友/同事的名字），用来回答「谁欠我钱」 */
+    val person: String,
+    @ColumnInfo(name = "amount_cents") val amountCents: Long,
+    /** 已经收回（或已经还掉）的金额，累积到 amountCents 就算结清 */
+    @ColumnInfo(name = "settled_cents") val settledCents: Long = 0L,
+    /** 这笔钱从哪个账户出/进 */
+    @ColumnInfo(name = "account_id") val accountId: Long,
+    @ColumnInfo(name = "occurred_at") val occurredAt: Long,
+    /** 约定还钱的日子，可空；只用来提示，不参与任何计算 */
+    @ColumnInfo(name = "due_at") val dueAt: Long? = null,
+    val note: String = "",
+    @ColumnInfo(name = "created_at") val createdAt: Long = System.currentTimeMillis()
+) {
+    /** 还没收回/还掉的金额。计算属性，不落库 */
+    val openCents: Long get() = (amountCents - settledCents).coerceAtLeast(0L)
+
+    /** 是否已经结清 */
+    val isSettled: Boolean get() = settledCents >= amountCents
+}
+
 /** 周期账单规则：到点自动生成一笔真实账单 */
 @Entity(tableName = "recurring")
 data class RecurringEntity(
@@ -147,4 +200,7 @@ class Converters {
 
     @TypeConverter fun freqToString(v: RecurFreq): String = v.name
     @TypeConverter fun stringToFreq(v: String): RecurFreq = RecurFreq.valueOf(v)
+
+    @TypeConverter fun directionToString(v: LoanDirection): String = v.name
+    @TypeConverter fun stringToDirection(v: String): LoanDirection = LoanDirection.valueOf(v)
 }

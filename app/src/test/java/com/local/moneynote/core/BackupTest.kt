@@ -6,11 +6,14 @@ import com.local.moneynote.data.BackupPayload
 import com.local.moneynote.data.BudgetEntity
 import com.local.moneynote.data.BudgetPeriod
 import com.local.moneynote.data.CategoryEntity
+import com.local.moneynote.data.LoanDirection
+import com.local.moneynote.data.LoanEntity
 import com.local.moneynote.data.RecurFreq
 import com.local.moneynote.data.RecurringEntity
 import com.local.moneynote.data.TransactionEntity
 import com.local.moneynote.data.TransactionRow
 import com.local.moneynote.data.TxKind
+import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -142,12 +145,43 @@ class BackupTest {
 
     @Test
     fun `不支持的备份版本会明确失败`() {
-        val json = Backup.toJson(samplePayload).replace("\"version\": 1", "\"version\": 999")
+        // 不写死 toJson 的缩进格式：直接改 JSON 对象，版本号变了也不会挂
+        val json = JSONObject(Backup.toJson(samplePayload)).put("version", 999).toString(2)
         try {
             Backup.fromJson(json)
             throw AssertionError("应该拒绝未知备份版本")
         } catch (e: IllegalArgumentException) {
             assertTrue(e.message.orEmpty().contains("备份版本"))
+        }
+    }
+
+    @Test
+    fun `老备份没有版本号和 parentId 也能导入`() {
+        val root = JSONObject(Backup.toJson(samplePayload))
+        root.remove("version")
+        // 模拟 v1 的导出文件：categories 里根本没有 parentId 这个字段
+        val cats = root.getJSONArray("categories")
+        for (i in 0 until cats.length()) cats.getJSONObject(i).remove("parentId")
+
+        val restored = Backup.fromJson(root.toString())
+
+        assertTrue(restored.categories.all { it.parentId == null })
+        assertEquals(samplePayload.categories.size, restored.categories.size)
+        assertEquals(samplePayload.transactions.size, restored.transactions.size)
+    }
+
+    @Test
+    fun `损坏的条目会明确报错而不是静默丢掉`() {
+        val root = JSONObject(Backup.toJson(samplePayload))
+        // 把第一笔账单的金额删掉。以前这里被 runCatching 吞掉，结果是「恢复成功」
+        // 但少了一笔账 —— 用户以为数据回来了，其实悄悄丢了一部分。
+        root.getJSONArray("transactions").getJSONObject(0).remove("amountCents")
+
+        try {
+            Backup.fromJson(root.toString())
+            throw AssertionError("损坏条目应该报错")
+        } catch (e: IllegalArgumentException) {
+            assertTrue(e.message.orEmpty().contains("数据无效"))
         }
     }
 
@@ -203,6 +237,56 @@ class BackupTest {
     fun `CSV 的收支类型输出中文`() {
         val csv = Backup.toCsv(listOf(sampleRow()))
         assertTrue(csv.contains("支出"))
+    }
+
+    @Test
+    fun `借还记录能正确往返`() {
+        val payload = samplePayload.copy(
+            loans = listOf(
+                LoanEntity(
+                    id = 1L,
+                    direction = LoanDirection.LENT,
+                    person = "张三",
+                    amountCents = 100_000L,
+                    settledCents = 30_000L,
+                    accountId = 1L,
+                    occurredAt = 1_700_000_000_000L,
+                    dueAt = 1_700_000_500_000L,
+                    note = "急用"
+                )
+            )
+        )
+
+        val restored = Backup.fromJson(Backup.toJson(payload)).loans.single()
+
+        assertEquals("张三", restored.person)
+        assertEquals(LoanDirection.LENT, restored.direction)
+        assertEquals(100_000L, restored.amountCents)
+        assertEquals(30_000L, restored.settledCents)
+        assertEquals(1_700_000_500_000L, restored.dueAt ?: 0L)
+        // 派生状态也要跟着对得上，才算真的复原了
+        assertEquals(70_000L, restored.openCents)
+        assertFalse(restored.isSettled)
+    }
+
+    @Test
+    fun `老备份没有借还这一段也能导入`() {
+        val root = JSONObject(Backup.toJson(samplePayload))
+        root.remove("loans")
+
+        assertTrue(Backup.fromJson(root.toString()).loans.isEmpty())
+    }
+
+    @Test
+    fun `账单里指向借还记录的引用能往返`() {
+        val payload = samplePayload.copy(
+            transactions = samplePayload.transactions.map { it.copy(loanId = 7L) }
+        )
+
+        val restored = Backup.fromJson(Backup.toJson(payload))
+
+        // 恢复后这些流水还得认得自己的借还记录，否则删记录时连带撤不掉
+        assertTrue(restored.transactions.all { it.loanId == 7L })
     }
 
     private fun sampleRow(
