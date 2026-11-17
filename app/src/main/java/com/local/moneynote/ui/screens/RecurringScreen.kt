@@ -177,6 +177,10 @@ fun RecurringScreen(vm: AppViewModel, onBack: () -> Unit) {
                 scope.launch { vm.repo.deleteRecurring(rule) }
                 showEditor = false
             },
+            onSkipNext = { rule ->
+                scope.launch { vm.repo.skipNextRecurring(rule) }
+                showEditor = false
+            },
             onSave = { entity ->
                 scope.launch {
                     if (entity.id == 0L) vm.repo.addRecurring(entity)
@@ -236,7 +240,8 @@ private fun RuleCard(
                     fontWeight = FontWeight.Medium
                 )
                 Text(
-                    "${freqLabel(rule.freq)} · ${accountName} · 下次 ${Dates.labelDayFull(rule.nextOccurAt)}",
+                    "${freqLabel(rule.freq)} · ${accountName} · 下次 ${Dates.labelDayFull(rule.nextOccurAt)}" +
+                        (rule.nextAmountCents?.let { "（这期 ¥${Money.format(it)}）" } ?: ""),
                     style = MaterialTheme.typography.labelSmall,
                     color = TextSecondary
                 )
@@ -244,7 +249,9 @@ private fun RuleCard(
             Spacer(Modifier.width(8.dp))
             Column(horizontalAlignment = Alignment.End) {
                 Text(
-                    (if (isExpense) "-" else "+") + Money.format(rule.amountCents),
+                    // 「这期临时改过金额」时显示改后的数字，跟副标题的那句提示对得上
+                    (if (isExpense) "-" else "+") +
+                        Money.format(rule.nextAmountCents ?: rule.amountCents),
                     style = MaterialTheme.typography.bodyLarge,
                     fontWeight = FontWeight.SemiBold,
                     color = if (isExpense) ExpenseRed else IncomeGreen
@@ -269,6 +276,7 @@ private fun RecurringEditorDialog(
     categories: List<CategoryEntity>,
     onDismiss: () -> Unit,
     onDelete: (RecurringEntity) -> Unit,
+    onSkipNext: (RecurringEntity) -> Unit,
     onSave: (RecurringEntity) -> Unit
 ) {
     var name by remember { mutableStateOf(initial?.name ?: "") }
@@ -281,6 +289,10 @@ private fun RecurringEditorDialog(
     var freq by remember { mutableStateOf(initial?.freq ?: RecurFreq.MONTHLY) }
     var nextAt by remember { mutableStateOf(initial?.nextOccurAt ?: System.currentTimeMillis()) }
     var dateExpanded by remember { mutableStateOf(false) }
+    // 只改下一期的金额，留空表示照常
+    var nextAmountText by remember {
+        mutableStateOf(initial?.nextAmountCents?.let { Money.formatPlain(it) } ?: "")
+    }
 
     val cats = categories.filter { it.kind == kind }
 
@@ -342,6 +354,34 @@ private fun RecurringEditorDialog(
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     modifier = Modifier.fillMaxWidth()
                 )
+
+                // 只有编辑已有规则时才谈得上「下一期」—— 新建时第一笔就是它本身
+                if (initial != null) {
+                    Spacer(Modifier.height(10.dp))
+                    OutlinedTextField(
+                        value = nextAmountText,
+                        onValueChange = { input ->
+                            val filtered = input.filter { it.isDigit() || it == '.' }
+                            if (filtered.count { it == '.' } <= 1 &&
+                                filtered.substringAfter('.', "").length <= 2 &&
+                                filtered.length <= 12
+                            ) {
+                                nextAmountText = filtered
+                            }
+                        },
+                        label = { Text("仅下一期改为（留空 = 不变）") },
+                        prefix = { Text("¥ ") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "比如这期房租多收了、话费套餐换了。只用一次，之后自动恢复原金额。",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = TextSecondary
+                    )
+                }
                 Spacer(Modifier.height(14.dp))
 
                 LabelText("类型")
@@ -421,6 +461,9 @@ private fun RecurringEditorDialog(
                         TextButton(onClick = { onDelete(initial) }) {
                             Text("删除", color = MaterialTheme.colorScheme.error)
                         }
+                        TextButton(onClick = { onSkipNext(initial) }) {
+                            Text("跳过下一次", color = BrandGreen)
+                        }
                     }
                     Spacer(Modifier.weight(1f))
                     TextButton(onClick = onDismiss) { Text("取消") }
@@ -443,6 +486,8 @@ private fun RecurringEditorDialog(
                                     intervalCount = initial?.intervalCount ?: 1,
                                     nextOccurAt = nextAt,
                                     lastGeneratedAt = initial?.lastGeneratedAt,
+                                    nextAmountCents = Money.parseToCents(nextAmountText)
+                                        ?.takeIf { it > 0L },
                                     enabled = initial?.enabled ?: true
                                 )
                             )

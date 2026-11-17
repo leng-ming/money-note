@@ -316,9 +316,15 @@ class MoneyRepository(private val db: AppDatabase) {
             var last = rule.lastGeneratedAt
             var guard = 0
             while (next <= now && guard < 400) {
+                // 「这期临时改金额」只对最靠前的那一期生效，之后的期恢复原金额
+                val amount = if (next == rule.nextOccurAt) {
+                    rule.nextAmountCents ?: rule.amountCents
+                } else {
+                    rule.amountCents
+                }
                 transactions.insert(
                     TransactionEntity(
-                        amountCents = rule.amountCents,
+                        amountCents = amount,
                         kind = rule.kind,
                         accountId = rule.accountId,
                         categoryId = rule.categoryId,
@@ -331,9 +337,32 @@ class MoneyRepository(private val db: AppDatabase) {
                 next = Dates.nextOccurrence(next, rule.freq, rule.intervalCount)
                 guard++
             }
-            recurring.update(rule.copy(nextOccurAt = next, lastGeneratedAt = last))
+            recurring.update(
+                rule.copy(
+                    nextOccurAt = next,
+                    lastGeneratedAt = last,
+                    // 一次性金额用掉就清空，别污染后面的每一期
+                    nextAmountCents = null
+                )
+            )
         }
         created
+    }
+
+    /**
+     * 跳过下一期：不生成账单，直接把下次时间推到再下一期。
+     *
+     * 用处是「这个月不住」「已经退订但懒得改规则」这种 ——
+     * 与其让它冒出一笔还得事后删掉的账，不如直接跳过去。
+     */
+    suspend fun skipNextRecurring(rule: RecurringEntity) {
+        val next = Dates.nextOccurrence(rule.nextOccurAt, rule.freq, rule.intervalCount)
+        recurring.update(rule.copy(nextOccurAt = next, nextAmountCents = null))
+    }
+
+    /** 只改下一期的金额；传 null 表示恢复原金额 */
+    suspend fun setRecurringNextAmount(rule: RecurringEntity, cents: Long?) {
+        recurring.update(rule.copy(nextAmountCents = cents))
     }
 
     /* ---------------- 借还 ---------------- */

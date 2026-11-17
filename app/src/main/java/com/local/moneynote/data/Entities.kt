@@ -184,6 +184,11 @@ data class RecurringEntity(
     @ColumnInfo(name = "interval_count") val intervalCount: Int = 1,
     @ColumnInfo(name = "next_occur_at") val nextOccurAt: Long,
     @ColumnInfo(name = "last_generated_at") val lastGeneratedAt: Long? = null,
+    /**
+     * 下一期临时改用这个金额（比如这期房租多收了 200、话费套餐变了）。
+     * 只在**下一次**生成时生效，用掉就清空，不会影响之后的每期。
+     */
+    @ColumnInfo(name = "next_amount_cents") val nextAmountCents: Long? = null,
     val enabled: Boolean = true
 )
 

@@ -117,6 +117,7 @@ object Backup {
         put("intervalCount", r.intervalCount)
         put("nextOccurAt", r.nextOccurAt)
         put("lastGeneratedAt", r.lastGeneratedAt ?: JSONObject.NULL)
+        put("nextAmountCents", r.nextAmountCents ?: JSONObject.NULL)
         put("enabled", r.enabled)
     }
 
@@ -221,6 +222,7 @@ object Backup {
                     intervalCount = o.optInt("intervalCount", 1),
                     nextOccurAt = o.optLong("nextOccurAt", System.currentTimeMillis()),
                     lastGeneratedAt = if (o.isNull("lastGeneratedAt")) null else o.getLong("lastGeneratedAt"),
+                    nextAmountCents = if (o.isNull("nextAmountCents")) null else o.getLong("nextAmountCents"),
                     enabled = o.optBoolean("enabled", true)
                 )
             },

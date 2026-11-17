@@ -15,8 +15,8 @@ android {
         targetSdk = 35
         // 功能版本（有新增能力）走整数次版本号；纯修复才加日期后缀。
         // 不论哪种，versionCode 都必须递增，否则 Android 会拒绝安装
-        versionCode = 15
-        versionName = "2.3"
+        versionCode = 16
+        versionName = "2.4"
         vectorDrawables { useSupportLibrary = true }
     }
 
@@ -61,6 +61,8 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
     implementation("androidx.activity:activity-compose:1.9.3")
+    // 应用锁：API 28+ 走 BiometricPrompt，更老的系统自动回退到 FingerprintManager
+    implementation("androidx.biometric:biometric:1.1.0")
 
     val composeBom = platform("androidx.compose:compose-bom:2024.10.01")
     implementation(composeBom)

@@ -70,6 +70,7 @@ import com.local.moneynote.core.Money
 import com.local.moneynote.data.AccountEntity
 import com.local.moneynote.data.CategoryEntity
 import com.local.moneynote.data.TxKind
+import com.local.moneynote.notify.PendingPayment
 import com.local.moneynote.ui.AccountStyles
 import com.local.moneynote.ui.CatIcons
 import com.local.moneynote.ui.parseHexColor
@@ -95,6 +96,8 @@ fun AddTransactionScreen(
     /** 从自动记账通知进来时预填的金额（分）；0 表示不预填 */
     prefillAmountCents: Long = 0L,
     prefillIncome: Boolean = false,
+    /** 是否由「自动记账提醒」跳进来的：保存成功后要把队列里那一条消费掉 */
+    prefillFromNotification: Boolean = false,
     onDone: () -> Unit
 ) {
     val accounts by vm.accounts.collectAsState()
@@ -265,6 +268,11 @@ fun AddTransactionScreen(
                     toAccountId = toAid,
                     feeCents = fee
                 )
+            }
+            // 从自动记账提醒进来的：这条已经落库，把队列里对应的那笔消费掉。
+            // 只消费一条 —— 后面还有几条就留在队列里，通知会提示还剩几笔。
+            if (prefillFromNotification && !isEditing) {
+                PendingPayment.consume(context)
             }
             onDone()
         }

@@ -17,6 +17,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
@@ -76,6 +77,13 @@ fun SearchScreen(
     var accountId by remember { mutableStateOf<Long?>(null) }
     var deleteTarget by remember { mutableStateOf<TransactionRow?>(null) }
 
+    // 金额范围：留空 = 不限。用文本做状态而不是直接存 Int，
+    // 否则输入「12.」这种中间态会被强行改写成别的数字，光标乱跳
+    var minAmountText by remember { mutableStateOf("") }
+    var maxAmountText by remember { mutableStateOf("") }
+    val minCents = Money.parseToCents(minAmountText) ?: 0L
+    val maxCents = Money.parseToCents(maxAmountText)
+
     val startEnd: Pair<Long, Long> = remember(rangeKey) {
         val today = LocalDate.now()
         when (rangeKey) {
@@ -95,7 +103,7 @@ fun SearchScreen(
         }
     }
 
-    val results by remember(keyword, startEnd, categoryId, accountId, kindFilter) {
+    val results by remember(keyword, startEnd, categoryId, accountId, kindFilter, minCents, maxCents) {
         vm.repo.search(
             start = startEnd.first,
             end = startEnd.second,
@@ -103,13 +111,19 @@ fun SearchScreen(
             categoryId = categoryId,
             accountId = accountId,
             kind = kindFilter,
-            minCents = 0L,
-            maxCents = null
+            minCents = minCents,
+            maxCents = maxCents
         )
     }.collectAsState(initial = emptyList())
 
-    val totalExpense = results.filter { it.kind == TxKind.EXPENSE }.sumOf { it.amountCents }
-    val totalIncome = results.filter { it.kind == TxKind.INCOME }.sumOf { it.amountCents }
+    // 和数据库的统计口径保持一致：借还、押金这类「不计入统计」的流水不进合计。
+    // 否则搜出来的「支出合计」会把借出去的 2000 也算进去，跟顶部月度支出对不上。
+    val totalExpense = results
+        .filter { it.kind == TxKind.EXPENSE && !it.excludeFromStats }
+        .sumOf { it.amountCents }
+    val totalIncome = results
+        .filter { it.kind == TxKind.INCOME && !it.excludeFromStats }
+        .sumOf { it.amountCents }
 
     Column(
         modifier = Modifier
@@ -239,6 +253,41 @@ fun SearchScreen(
                     }
                 )
             }
+        }
+
+        Spacer(Modifier.height(10.dp))
+
+        // 金额范围 —— 用来回答「这几个月超过 100 块的大额支出都有哪些」这类问题，
+        // 留空即不限
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            OutlinedTextField(
+                value = minAmountText,
+                onValueChange = { minAmountText = it },
+                label = { Text("最低金额") },
+                prefix = { Text("¥") },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                modifier = Modifier.weight(1f)
+            )
+            Text(
+                "—",
+                color = TextSecondary,
+                modifier = Modifier.padding(horizontal = 8.dp)
+            )
+            OutlinedTextField(
+                value = maxAmountText,
+                onValueChange = { maxAmountText = it },
+                label = { Text("最高金额") },
+                prefix = { Text("¥") },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                modifier = Modifier.weight(1f)
+            )
         }
 
         Spacer(Modifier.height(10.dp))

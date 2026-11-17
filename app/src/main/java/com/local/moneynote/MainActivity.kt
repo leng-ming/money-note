@@ -3,8 +3,9 @@ package com.local.moneynote
 import android.app.Activity
 import android.content.Intent
 import android.os.Bundle
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+// 应用锁用的 androidx.biometric 需要 FragmentActivity 作为宿主
+import androidx.fragment.app.FragmentActivity
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -13,12 +14,18 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ReceiptLong
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.PieChart
 import androidx.compose.material.icons.filled.Savings
@@ -43,9 +50,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -55,6 +64,8 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.local.moneynote.core.AppLock
+import com.local.moneynote.core.AutoBackup
 import com.local.moneynote.notify.PaymentNotificationListener
 import com.local.moneynote.notify.PendingPayment
 import com.local.moneynote.ui.screens.AccountDetailScreen
@@ -72,7 +83,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 
-class MainActivity : ComponentActivity() {
+class MainActivity : FragmentActivity() {
     /**
      * 每收到一个新 Intent 就 +1。
      *
@@ -90,7 +101,7 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    AppRoot(intentTick)
+                    AppGate(intentTick)
                 }
             }
         }
@@ -100,6 +111,79 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         intentTick.value += 1
+    }
+}
+
+/**
+ * 应用锁的门。
+ *
+ * 开了锁之后，App 每次从后台回来都要重新验证 —— 只在冷启动锁是不够的：
+ * 用户切出去回条微信再回来，账目就全晾在那儿了，等于没锁。
+ */
+@Composable
+private fun AppGate(intentTick: StateFlow<Int>) {
+    val context = LocalContext.current
+    val activity = context as? FragmentActivity
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    // 没开锁、或者设备已经不支持生物识别，就直接放行。
+    // 后者很重要：指纹被人删光时还得让用户进去，否则等于把自己锁在门外。
+    var unlocked by remember { mutableStateOf(!AppLock.shouldLock(context)) }
+
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP && AppLock.shouldLock(context)) {
+                unlocked = false
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    // 冷启动自动弹一次，省得还要再点一下
+    LaunchedEffect(Unit) {
+        if (!unlocked && activity != null) {
+            AppLock.prompt(activity, onSuccess = { unlocked = true }, onFail = {})
+        }
+    }
+
+    if (unlocked) {
+        AppRoot(intentTick)
+    } else {
+        LockScreen(
+            onUnlock = {
+                if (activity != null) {
+                    AppLock.prompt(activity, onSuccess = { unlocked = true }, onFail = {})
+                }
+            }
+        )
+    }
+}
+
+@Composable
+private fun LockScreen(onUnlock: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .clickable(onClick = onUnlock),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Icon(
+                Icons.Filled.Lock,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(46.dp)
+            )
+            Spacer(Modifier.height(14.dp))
+            Text("小鲸鱼记账", style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "点一下解锁",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
     }
 }
 
@@ -116,6 +200,12 @@ private fun AppRoot(intentTick: StateFlow<Int>) {
     // 不重新绑定的话服务再也收不到通知 —— 用户看到的就是「权限明明开了却毫无反应」。
     LaunchedEffect(Unit) {
         PaymentNotificationListener.requestRebind(context)
+    }
+
+    // 自动备份：用户设过目录、且距上次超过一天，就顺手导一份进去。
+    // 全程静默 —— 备份是后台保障，不该弹窗打扰记账。
+    LaunchedEffect(Unit) {
+        runCatching { AutoBackup.maybeRun(context, vm.repo.snapshotForBackup()) }
     }
 
     // 每次回到前台也重绑一次。
@@ -139,10 +229,13 @@ private fun AppRoot(intentTick: StateFlow<Int>) {
             ?.getBooleanExtra(PendingPayment.EXTRA_FROM_NOTIFICATION, false) == true
         if (!fromNotification) return@LaunchedEffect
 
+        // 读出来但**先不删**：用户可能中途退出，那条还得留在队列里。
+        // 真正消费发生在记账页保存成功之后（PendingPayment.consume）。
         val pending = PendingPayment.read(context)
-        PendingPayment.clear(context)
         if (pending != null) {
-            nav.navigate("edit?amount=${pending.amountCents}&income=${pending.isIncome}")
+            nav.navigate(
+                "edit?amount=${pending.amountCents}&income=${pending.isIncome}&notif=true"
+            )
         }
     }
 
@@ -184,7 +277,7 @@ private fun AppRoot(intentTick: StateFlow<Int>) {
         }
 
         composable(
-            route = "edit?txId={txId}&amount={amount}&income={income}",
+            route = "edit?txId={txId}&amount={amount}&income={income}&notif={notif}",
             arguments = listOf(
                 navArgument("txId") {
                     type = NavType.LongType
@@ -198,6 +291,11 @@ private fun AppRoot(intentTick: StateFlow<Int>) {
                 navArgument("income") {
                     type = NavType.BoolType
                     defaultValue = false
+                },
+                // 是否由「自动记账提醒」跳进来 —— 是的话保存后要把队列里那条消费掉
+                navArgument("notif") {
+                    type = NavType.BoolType
+                    defaultValue = false
                 }
             )
         ) { entry ->
@@ -206,6 +304,7 @@ private fun AppRoot(intentTick: StateFlow<Int>) {
                 txId = entry.arguments?.getLong("txId") ?: -1L,
                 prefillAmountCents = entry.arguments?.getLong("amount") ?: 0L,
                 prefillIncome = entry.arguments?.getBoolean("income") ?: false,
+                prefillFromNotification = entry.arguments?.getBoolean("notif") ?: false,
                 onDone = { nav.popBackStack() }
             )
         }

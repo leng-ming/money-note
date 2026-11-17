@@ -36,6 +36,7 @@ import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.FileUpload
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.GridOn
 import androidx.compose.material.icons.filled.Handshake
 import androidx.compose.material.icons.filled.NotificationsActive
@@ -48,6 +49,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -70,6 +72,8 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.local.moneynote.AppViewModel
+import com.local.moneynote.core.AppLock
+import com.local.moneynote.core.AutoBackup
 import com.local.moneynote.core.Backup
 import com.local.moneynote.core.Money
 import com.local.moneynote.data.AccountEntity
@@ -125,6 +129,8 @@ fun SettingsScreen(
     // 自动记账的诊断记录
     var showDiagnostics by remember { mutableStateOf(false) }
 
+    // 应用锁开关。注意它是独立于数据库的一份偏好，跟着设配置走
+    var lockEnabled by remember { mutableStateOf(AppLock.isEnabled(context)) }
     // 自动记账的两个授权状态。授权都在系统里做，用户点完返回时才会变，
     // 所以监听 ON_RESUME 重新查一次，否则界面会一直停在旧状态。
     var notifyGranted by remember {
@@ -212,6 +218,26 @@ fun SettingsScreen(
         if (uri != null) {
             pendingImportUri = uri
             showImportConfirm = true
+        }
+    }
+
+    // 自动备份选定的目录（SAF），null = 没开
+    var autoBackupDir by remember { mutableStateOf(AutoBackup.dirUri(context)) }
+
+    val autoBackupDirLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        if (uri != null) {
+            // 必须拿到持久化授权，否则重启 App 后这个目录就打不开了
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                )
+            }
+            AutoBackup.setDir(context, uri)
+            autoBackupDir = uri
+            toast("已开启自动备份：每天一份，保留最近 7 份")
         }
     }
 
@@ -360,6 +386,42 @@ fun SettingsScreen(
         }
 
         item {
+            SectionCard(title = "隐私与安全") {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            "应用锁",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = TextPrimary
+                        )
+                        Text(
+                            "打开 App 或从后台切回来时，需要指纹 / 人脸验证",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextSecondary
+                        )
+                    }
+                    Switch(
+                        checked = lockEnabled,
+                        onCheckedChange = { want ->
+                            if (want && !AppLock.canAuthenticate(context)) {
+                                toast("这台设备没有可用的指纹或人脸，开不了应用锁")
+                            } else {
+                                AppLock.setEnabled(context, want)
+                                lockEnabled = want
+                                toast(if (want) "已开启应用锁" else "已关闭应用锁")
+                            }
+                        }
+                    )
+                }
+            }
+        }
+
+        item {
             SectionCard(title = "借还与往来") {
                 ManageRow(
                     icon = Icons.Filled.Handshake,
@@ -379,6 +441,25 @@ fun SettingsScreen(
                     title = "周期账单",
                     subtitle = "房租、话费、订阅自动记账",
                     onClick = onOpenRecurring
+                )
+                ManageRow(
+                    icon = Icons.Filled.Folder,
+                    iconColor = BrandGreen,
+                    title = "自动备份到文件夹",
+                    subtitle = if (autoBackupDir == null) {
+                        "点这里选一个目录，之后每天自动备份一份"
+                    } else {
+                        "已开启 · 每天一份，保留最近 7 份（点此关闭）"
+                    },
+                    onClick = {
+                        if (autoBackupDir == null) {
+                            autoBackupDirLauncher.launch(null)
+                        } else {
+                            AutoBackup.clear(context)
+                            autoBackupDir = null
+                            toast("已关闭自动备份")
+                        }
+                    }
                 )
                 ManageRow(
                     icon = Icons.Filled.FileDownload,

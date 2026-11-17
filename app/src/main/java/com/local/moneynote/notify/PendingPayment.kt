@@ -11,9 +11,11 @@ import androidx.core.app.NotificationManagerCompat
 import com.local.moneynote.MainActivity
 import com.local.moneynote.R
 import com.local.moneynote.core.Money
+import org.json.JSONArray
+import org.json.JSONObject
 
 /**
- * 「刚识别到一笔支付」的暂存 + 提醒。
+ * 「刚识别到一笔支付」的暂存队列 + 提醒。
  *
  * 为什么不直接静默落库：通知里的信息太薄（往往只有金额，没有商户、没有分类、
  * 甚至分不清是付款还是收款），直接写进去只会造出一堆要事后返工的错账。
@@ -22,14 +24,21 @@ import com.local.moneynote.core.Money
  *
  * 暂存用 SharedPreferences 而不是内存变量：通知监听服务和 MainActivity
  * 不在同一个生命周期里，系统随时可能回收其中一个，内存变量会丢。
+ *
+ * **为什么是队列而不是单个字段**：以前用一组固定的 prefs key 存一笔，
+ * 短时间连着收到两笔付款（比如超市分两次付、或者一边网购一边点外卖），
+ * 后一笔会把前一笔直接覆盖掉 —— 第一笔就这样无声无息地没了。
  */
 object PendingPayment {
 
     private const val PREF = "moneynote_pending"
-    private const val KEY_AMOUNT = "amount_cents"
-    private const val KEY_SOURCE = "source"
-    private const val KEY_INCOME = "is_income"
-    private const val KEY_AT = "at"
+    private const val KEY_QUEUE = "queue"
+
+    /** 队列上限，防止一路堆下去 */
+    private const val MAX_ITEMS = 10
+
+    /** 超过这个时间的暂存就不理了（比如用户一小时后才点开通知） */
+    private const val MAX_AGE_MS = 30 * 60 * 1000L
 
     /** 从通知点进来时带的标记，MainActivity 靠它决定要不要跳记账页 */
     const val EXTRA_FROM_NOTIFICATION = "from_payment_notification"
@@ -38,46 +47,101 @@ object PendingPayment {
     private const val CHANNEL_NAME = "自动记账提醒"
     private const val NOTIFICATION_ID = 9001
 
-    /** 超过这个时间的暂存就不理了（比如用户一小时后才点开通知） */
-    private const val MAX_AGE_MS = 30 * 60 * 1000L
+    private data class Item(
+        val amountCents: Long,
+        val source: String,
+        val isIncome: Boolean,
+        val at: Long
+    )
 
+    /* ---------------- 队列读写 ---------------- */
+
+    /** 入队 */
     fun save(context: Context, parsed: PaymentParser.Parsed) {
-        context.getSharedPreferences(PREF, Context.MODE_PRIVATE).edit()
-            .putLong(KEY_AMOUNT, parsed.amountCents)
-            .putString(KEY_SOURCE, parsed.source)
-            .putBoolean(KEY_INCOME, parsed.isIncome)
-            .putLong(KEY_AT, System.currentTimeMillis())
-            .apply()
+        val now = System.currentTimeMillis()
+        val list = items(context).toMutableList()
+        list.add(Item(parsed.amountCents, parsed.source, parsed.isIncome, now))
+
+        // 过期的扔掉，再只留最近 MAX_ITEMS 条
+        val cutoff = now - MAX_AGE_MS
+        write(context, list.filter { it.at >= cutoff }.takeLast(MAX_ITEMS))
     }
 
-    /** 读出暂存；太旧的当作过期，返回 null 并顺手清掉 */
-    fun read(context: Context): PaymentParser.Parsed? {
-        val sp = context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
-        val amount = sp.getLong(KEY_AMOUNT, 0L)
-        if (amount <= 0L) return null
-
-        if (System.currentTimeMillis() - sp.getLong(KEY_AT, 0L) > MAX_AGE_MS) {
-            clear(context)
-            return null
-        }
-        return PaymentParser.Parsed(
-            amountCents = amount,
-            source = sp.getString(KEY_SOURCE, "") ?: "",
-            isIncome = sp.getBoolean(KEY_INCOME, false)
+    /** 读最早的一条（**不出队**：用户中途退出去，这条还在） */
+    fun read(context: Context): PaymentParser.Parsed? = items(context).firstOrNull()?.let {
+        PaymentParser.Parsed(
+            amountCents = it.amountCents,
+            source = it.source,
+            isIncome = it.isIncome
         )
     }
 
+    /** 队列里还有几条待确认 */
+    fun count(context: Context): Int = items(context).size
+
+    /**
+     * 用户真的把那一条记下来之后调用。
+     *
+     * 只出队一条 —— 剩下的继续留在队列里，接着点通知就能逐条处理。
+     * 这跟「读完就清空」是两回事：中途放弃不该把后面的账也丢掉。
+     */
+    fun consume(context: Context) {
+        val list = items(context)
+        if (list.isEmpty()) return
+        val rest = list.drop(1)
+        write(context, rest)
+        refreshNotification(context, rest)
+    }
+
     fun clear(context: Context) {
-        context.getSharedPreferences(PREF, Context.MODE_PRIVATE).edit().clear().apply()
+        write(context, emptyList())
         runCatching {
             NotificationManagerCompat.from(context).cancel(NOTIFICATION_ID)
         }
     }
 
+    /* ---------------- 通知 ---------------- */
+
     /** 发一条「记一笔？」的提醒，点它跳记账页 */
     fun post(context: Context, parsed: PaymentParser.Parsed) {
         ensureChannel(context)
 
+        val queued = count(context)
+        val action = if (parsed.isIncome) "收款" else "支出"
+        val title = buildString {
+            append(parsed.source).append(action)
+            append(" ¥").append(Money.format(parsed.amountCents))
+            if (queued > 1) append(" 等 ").append(queued).append(" 笔")
+        }
+        val text = if (queued > 1) {
+            "点一下从第一笔记起，记完会自动跳到下一笔"
+        } else {
+            "点一下记下来，分类和账户确认一下就好"
+        }
+
+        notify(context, title, text)
+    }
+
+    /** 消费掉一条之后刷新通知文案；队列空了就把它收掉 */
+    private fun refreshNotification(context: Context, rest: List<Item>) {
+        if (rest.isEmpty()) {
+            runCatching {
+                NotificationManagerCompat.from(context).cancel(NOTIFICATION_ID)
+            }
+            return
+        }
+        ensureChannel(context)
+        val head = rest.first()
+        val action = if (head.isIncome) "收款" else "支出"
+        val title = buildString {
+            append(head.source).append(action)
+            append(" ¥").append(Money.format(head.amountCents))
+            if (rest.size > 1) append(" 等 ").append(rest.size).append(" 笔")
+        }
+        notify(context, title, "还剩 ${rest.size} 笔待确认")
+    }
+
+    private fun notify(context: Context, title: String, text: String) {
         val intent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
             putExtra(EXTRA_FROM_NOTIFICATION, true)
@@ -85,12 +149,12 @@ object PendingPayment {
         val flags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         val pending = PendingIntent.getActivity(context, 0, intent, flags)
 
-        val action = if (parsed.isIncome) "收款" else "支出"
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
-            .setContentTitle("${parsed.source}$action ¥${Money.format(parsed.amountCents)}")
-            .setContentText("点一下记下来，分类和账户确认一下就好")
+            .setContentTitle(title)
+            .setContentText(text)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setOnlyAlertOnce(false)
             .setAutoCancel(true)
             .setContentIntent(pending)
             .build()
@@ -98,6 +162,51 @@ object PendingPayment {
         runCatching {
             NotificationManagerCompat.from(context).notify(NOTIFICATION_ID, notification)
         }
+    }
+
+    /* ---------------- 存储 ---------------- */
+
+    /** 读出未过期的条目；顺带把过期的清掉 */
+    private fun items(context: Context): List<Item> {
+        val raw = context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
+            .getString(KEY_QUEUE, null) ?: return emptyList()
+        val cutoff = System.currentTimeMillis() - MAX_AGE_MS
+
+        val parsed = runCatching {
+            val arr = JSONArray(raw)
+            (0 until arr.length()).mapNotNull { i ->
+                val o = arr.optJSONObject(i) ?: return@mapNotNull null
+                val amount = o.optLong("amount", 0L)
+                if (amount <= 0L) return@mapNotNull null
+                Item(
+                    amountCents = amount,
+                    source = o.optString("source", ""),
+                    isIncome = o.optBoolean("income", false),
+                    at = o.optLong("at", 0L)
+                )
+            }
+        }.getOrDefault(emptyList())
+
+        val fresh = parsed.filter { it.at >= cutoff }
+        if (fresh.size != parsed.size) write(context, fresh)
+        return fresh
+    }
+
+    private fun write(context: Context, list: List<Item>) {
+        val arr = JSONArray()
+        list.forEach { item ->
+            arr.put(
+                JSONObject().apply {
+                    put("amount", item.amountCents)
+                    put("source", item.source)
+                    put("income", item.isIncome)
+                    put("at", item.at)
+                }
+            )
+        }
+        context.getSharedPreferences(PREF, Context.MODE_PRIVATE).edit()
+            .putString(KEY_QUEUE, arr.toString())
+            .apply()
     }
 
     private fun ensureChannel(context: Context) {

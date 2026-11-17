@@ -18,7 +18,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         BudgetCarryoverEntity::class,
         LoanEntity::class
     ],
-    version = 5,
+    version = 6,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -44,7 +44,7 @@ abstract class AppDatabase : RoomDatabase() {
                     "money_note.db"
                 )
                     .addCallback(SeedCallback)
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                     .build()
                     .also { INSTANCE = it }
             }
@@ -163,6 +163,17 @@ abstract class AppDatabase : RoomDatabase() {
                         "`created_at` INTEGER NOT NULL)"
                 )
                 db.execSQL("ALTER TABLE `transactions` ADD COLUMN `loan_id` INTEGER")
+            }
+        }
+
+        /**
+         * v5 → v6：周期账单支持「这期临时改金额」。
+         *
+         * 纯加一列可空字段，老数据的 nextAmountCents 为 null，行为完全不变。
+         */
+        private val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `recurring` ADD COLUMN `next_amount_cents` INTEGER")
             }
         }
 
