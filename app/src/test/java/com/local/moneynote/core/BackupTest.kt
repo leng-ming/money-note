@@ -303,6 +303,7 @@ class BackupTest {
         note = note,
         occurredAt = Dates.toMillis(LocalDate.of(2026, 9, 26), java.time.LocalTime.of(12, 30)),
         excludeFromStats = false,
+        loanId = null,
         categoryName = "餐饮",
         categoryIcon = "food",
         categoryColor = "#FFEF6C00",

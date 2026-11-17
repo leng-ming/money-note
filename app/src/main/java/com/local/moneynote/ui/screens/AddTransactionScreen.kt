@@ -113,6 +113,7 @@ fun AddTransactionScreen(
     var note by remember { mutableStateOf("") }
     var occurredAt by remember { mutableStateOf(System.currentTimeMillis()) }
     var loaded by remember { mutableStateOf(false) }
+    var loanLinked by remember { mutableStateOf(false) }
     // 用户是否手动选过账户。选过之后就不再自动预选，免得"抢"用户的选择
     var accountTouched by remember { mutableStateOf(false) }
 
@@ -138,6 +139,7 @@ fun AddTransactionScreen(
                 occurredAt = t.occurredAt
                 toAccountId = t.toAccountId
                 feeText = if (t.feeCents > 0L) Money.formatPlain(t.feeCents) else ""
+                loanLinked = t.loanId != null
                 // 编辑时沿用原账单的账户，不要被"账户记忆"覆盖
                 accountTouched = true
             }
@@ -191,6 +193,10 @@ fun AddTransactionScreen(
     }
 
     fun save() {
+        if (loanLinked) {
+            toast("借还流水请在「借还记录」中操作")
+            return
+        }
         val cents = Money.parseToCents(amountText)
         if (cents == null || cents <= 0L) {
             toast("请输入金额")
@@ -300,6 +306,14 @@ fun AddTransactionScreen(
         }
 
         // ---------- 金额 ----------
+        if (loanLinked) {
+            Text(
+                "这是一笔借还流水，请返回「借还记录」进行收回、还款或删除。",
+                style = MaterialTheme.typography.labelMedium,
+                color = TextSecondary,
+                modifier = Modifier.padding(horizontal = 18.dp, vertical = 4.dp)
+            )
+        }
         AmountDisplay(amountText = amountText, kind = kind)
 
         // ---------- 分类 / 转账 ----------

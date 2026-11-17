@@ -304,7 +304,12 @@ fun SearchScreen(
         AlertDialog(
             onDismissRequest = { deleteTarget = null },
             title = { Text("删除这笔账？") },
-            text = { Text("${target.categoryName}  ¥${Money.format(target.amountCents)}") },
+            text = {
+                Text(
+                    (if (target.loanId != null) "这笔是借还流水，删除会连带删除对应的借还记录。\n" else "") +
+                        "${target.categoryName.ifBlank { target.note.ifBlank { "借还流水" } }}  ¥${Money.format(target.amountCents)}"
+                )
+            },
             confirmButton = {
                 TextButton(onClick = {
                     val id = target.id

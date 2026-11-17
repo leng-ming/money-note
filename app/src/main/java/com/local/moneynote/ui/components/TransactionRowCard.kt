@@ -53,16 +53,17 @@ fun TransactionRowCard(
     val isExpense = row.kind == TxKind.EXPENSE
 
     // 转账没有分类，标题直接写成「从 → 到」，一眼就知道钱去哪了
-    val title = if (isTransfer) {
-        "${row.accountName} → ${row.toAccountName}"
-    } else {
-        row.categoryName
+    val title = when {
+        isTransfer -> "${row.accountName} → ${row.toAccountName}"
+        row.loanId != null -> row.note.ifBlank { "借还流水" }
+        else -> row.categoryName
     }
     // 转账的副标题优先显示手续费 —— 那是转账唯一容易漏记的信息
     val subtitle = when {
         isTransfer && row.feeCents > 0L ->
             "手续费 ¥" + Money.format(row.feeCents) + "，实际到账 ¥" +
                 Money.format(row.amountCents - row.feeCents)
+        row.loanId != null -> "借还流水 · " + row.accountName
         else -> row.note
     }
 

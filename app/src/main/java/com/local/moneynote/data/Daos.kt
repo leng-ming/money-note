@@ -28,6 +28,8 @@ data class TransactionRow(
     val note: String,
     val occurredAt: Long,
     val excludeFromStats: Boolean,
+    /** 借还自动生成的流水所属记录；普通账单为 null */
+    val loanId: Long?,
     val categoryName: String,
     val categoryIcon: String,
     val categoryColor: String,
@@ -162,6 +164,7 @@ interface TransactionDao {
             "t.account_id AS accountId, t.to_account_id AS toAccountId, t.fee_cents AS feeCents, " +
             "t.category_id AS categoryId, t.note AS note, " +
             "t.occurred_at AS occurredAt, t.exclude_from_stats AS excludeFromStats, " +
+            "t.loan_id AS loanId, " +
             "COALESCE(c.name, '') AS categoryName, " +
             "COALESCE(p.icon_key, c.icon_key, 'more') AS categoryIcon, " +
             "COALESCE(p.color_hex, c.color_hex, '#FF607D8B') AS categoryColor, " +
@@ -182,6 +185,7 @@ interface TransactionDao {
             "t.account_id AS accountId, t.to_account_id AS toAccountId, t.fee_cents AS feeCents, " +
             "t.category_id AS categoryId, t.note AS note, " +
             "t.occurred_at AS occurredAt, t.exclude_from_stats AS excludeFromStats, " +
+            "t.loan_id AS loanId, " +
             "COALESCE(c.name, '') AS categoryName, " +
             "COALESCE(p.icon_key, c.icon_key, 'more') AS categoryIcon, " +
             "COALESCE(p.color_hex, c.color_hex, '#FF607D8B') AS categoryColor, " +

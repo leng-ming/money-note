@@ -296,7 +296,10 @@ fun TransactionListScreen(
             text = {
                 Text(
                     buildString {
-                        append(target.categoryName)
+                        if (target.loanId != null) {
+                            append("这笔是借还流水，删除会连带删除对应的借还记录。\n")
+                        }
+                        append(target.categoryName.ifBlank { target.note.ifBlank { "借还流水" } })
                         append("  ¥")
                         append(Money.format(target.amountCents))
                         if (target.note.isNotBlank()) {

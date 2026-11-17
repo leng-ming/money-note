@@ -281,7 +281,11 @@ object Backup {
         rows.forEach { r ->
             val date = Dates.toLocalDate(r.occurredAt).toString()
             val time = Dates.labelTime(r.occurredAt)
-            val type = if (r.kind == TxKind.EXPENSE) "支出" else "收入"
+            val type = when {
+                r.loanId != null -> "借还流水"
+                r.kind == TxKind.EXPENSE -> "支出"
+                else -> "收入"
+            }
             val amount = Money.formatPlain(r.amountCents)
             sb.append(csvEscape(date)).append(',')
                 .append(csvEscape(time)).append(',')

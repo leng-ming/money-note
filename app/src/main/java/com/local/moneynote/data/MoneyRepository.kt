@@ -215,10 +215,20 @@ class MoneyRepository(private val db: AppDatabase) {
         )
     )
 
-    suspend fun updateTransaction(e: TransactionEntity) =
+    suspend fun updateTransaction(e: TransactionEntity) {
+        // 借还流水必须通过借还页修改，否则本金/已还金额会和账户流水分离。
+        if (e.loanId != null) return
         transactions.update(e.copy(updatedAt = System.currentTimeMillis()))
+    }
 
-    suspend fun deleteTransaction(e: TransactionEntity) = transactions.delete(e)
+    suspend fun deleteTransaction(e: TransactionEntity) = db.withTransaction {
+        if (e.loanId != null) {
+            transactions.deleteByLoanId(e.loanId)
+            loans.byId(e.loanId)?.let { loans.delete(it) }
+        } else {
+            transactions.delete(e)
+        }
+    }
 
     /* ---------------- 预算 ---------------- */
 
